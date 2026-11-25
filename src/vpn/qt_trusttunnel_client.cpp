@@ -73,6 +73,10 @@ QtTrustTunnelClient::QtTrustTunnelClient(QObject *parent)
     m_fdWatchdogTimer.setInterval(testHookMs("FT_TEST_FD_WATCHDOG_MS", 10000)); // every 10 s
     connect(&m_fdWatchdogTimer, &QTimer::timeout, this, &QtTrustTunnelClient::checkFdHealth);
 
+#ifdef Q_OS_LINUX
+    connect(&m_fdWatchdogTimer, &QTimer::timeout, this, &QtTrustTunnelClient::refreshPhysicalConnectivity);
+    connect(this, &QtTrustTunnelClient::vpnConnected, this, &QtTrustTunnelClient::refreshPhysicalConnectivity);
+#endif
     // Windows: follow the network adapter the session runs over
     // (qt_trusttunnel_uplink.cpp). Every 2 s: a docked laptop or an unplugged
     // cable is noticed within a few seconds, and the look itself costs a

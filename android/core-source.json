@@ -14,7 +14,9 @@
     "vendor/trusttunnel/14-in-session-endpoint-switch.patch",
     "vendor/trusttunnel/15-scope-tls-session-cache.patch",
     "vendor/trusttunnel/16-preserve-pending-direct-dns.patch",
-    "vendor/trusttunnel/18-android-native-config-lifetime.patch"
+    "vendor/trusttunnel/18-android-native-config-lifetime.patch",
+    "vendor/trusttunnel/19-bypass-tcp-handshake.patch",
+    "vendor/trusttunnel/20-hostname-routing-recovery.patch"
   ],
   "abis": [
     "arm64-v8a",

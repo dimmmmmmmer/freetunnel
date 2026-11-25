@@ -1,0 +1,286 @@
+diff --git a/core/include/vpn/internal/utils.h b/core/include/vpn/internal/utils.h
+index 3d8af06..cb4796c 100644
+--- a/core/include/vpn/internal/utils.h
++++ b/core/include/vpn/internal/utils.h
+@@ -60,10 +60,15 @@ inline bool operator!=(const NamePort &lh, const NamePort &rh) {
+     return !(lh == rh);
+ }
+ 
+ using TunnelAddress = std::variant<SocketAddress, NamePort>;
+ 
++inline bool is_global_ipv6_unicast(const TunnelAddress &address) {
++    const auto *dst = std::get_if<SocketAddress>(&address);
++    return dst != nullptr && dst->is_ipv6() && (dst->addr()[0] & 0xe0) == 0x20;
++}
++
+ struct TunnelAddressPair {
+     SocketAddress src;
+     TunnelAddress dst;
+ 
+     TunnelAddressPair() = delete;
+diff --git a/core/include/vpn/internal/vpn_client.h b/core/include/vpn/internal/vpn_client.h
+index 171024d..c51722f 100644
+--- a/core/include/vpn/internal/vpn_client.h
++++ b/core/include/vpn/internal/vpn_client.h
+@@ -196,4 +196,5 @@ public:
+     SocketAddress socks_listener_address{}; // The address the SOCKS listener is bound to
+     bool bypass_upstream_session_opened = false;
++    std::chrono::steady_clock::time_point direct_ipv6_confirmed_until{};
+     bool in_disconnect = false;
+     VpnMode exclusions_mode = VPN_MODE_GENERAL;
+diff --git a/core/include/vpn/internal/vpn_connection.h b/core/include/vpn/internal/vpn_connection.h
+index a81f6a6..f60d237 100644
+--- a/core/include/vpn/internal/vpn_connection.h
++++ b/core/include/vpn/internal/vpn_connection.h
+@@ -107,9 +107,10 @@ protected:
+ struct UdpVpnConnection : public VpnConnection {
+     explicit UdpVpnConnection(TunnelAddressPair);
+ };
+ 
+ struct TcpVpnConnection : public VpnConnection {
++    event_loop::AutoTaskId first_client_data_timeout;
+     explicit TcpVpnConnection(TunnelAddressPair);
+ };
+ 
+ } // namespace ag
+diff --git a/core/src/fake_upstream.cpp b/core/src/fake_upstream.cpp
+index 23aa7fa..4d31300 100644
+--- a/core/src/fake_upstream.cpp
++++ b/core/src/fake_upstream.cpp
+@@ -50,17 +50,17 @@ uint64_t FakeUpstream::open_connection(const TunnelAddressPair *addr, int proto,
+     if (!m_session_open) {
+         return NON_ID;
+     }
+ 
+     uint64_t id = this->vpn->upstream_conn_id_generator.get();
+-    const auto *dst = std::get_if<SocketAddress>(&addr->dst);
+-    if (proto == IPPROTO_TCP && vpn->domain_filter.get_mode() == VPN_MODE_SELECTIVE && dst != nullptr
+-            && dst->addr().size() == sizeof(in6_addr) && (dst->addr()[0] & 0xe0) == 0x20
+-            && vpn_network_manager_has_limited_ipv6()) {
+-        // Only an early ACK can win the application's address race without reaching
+-        // a peer. Give it time to start its IPv4 attempt on this degraded uplink.
+-        // A client with only this address still gets its original IPv6 connection.
++    if (proto == IPPROTO_TCP && is_global_ipv6_unicast(addr->dst) && vpn->bypass_upstream
++            && vpn->bypass_upstream->ip_version_availability.test(IPV4)
++            && (!vpn->bypass_upstream->ip_version_availability.test(IPV6) || vpn_network_manager_has_limited_ipv6()
++                    || std::chrono::steady_clock::now() >= vpn->direct_ipv6_confirmed_until)) {
++        // A synthetic ACK can cancel the application's IPv4 attempt before we know
++        // whether the eventual direct peer is reachable. Only delay that ACK; the
++        // application still controls which address to dial, including IPv6-only peers.
+         m_delayed_connections.emplace(id, event_loop::schedule(vpn->parameters.ev_loop, [this, id]() {
+             m_delayed_connections.at(id).release();
+             m_delayed_connections.erase(id);
+             uint64_t opened = id;
+             handler.func(handler.arg, SERVER_EVENT_CONNECTION_OPENED, &opened);
+diff --git a/core/src/tunnel.cpp b/core/src/tunnel.cpp
+index 39c296b..f945edd 100644
+--- a/core/src/tunnel.cpp
++++ b/core/src/tunnel.cpp
+@@ -636,10 +636,14 @@ void Tunnel::upstream_handler(const std::shared_ptr<ServerUpstream> &upstream, S
+             upstream->close_connection(id, false, true);
+             assert(0);
+             break;
+         }
+ 
++        if (upstream == this->vpn->bypass_upstream && conn->proto == IPPROTO_TCP
++                && is_global_ipv6_unicast(conn->addr.dst)) {
++            this->vpn->direct_ipv6_confirmed_until = std::chrono::steady_clock::now() + std::chrono::minutes(5);
++        }
+         switch (conn->state) {
+         case CONNS_WAITING_RESPONSE: {
+             log_conn(this, conn, dbg, "Successfully made tunnel ({})",
+                     upstream.get() == this->vpn->endpoint_upstream.get()         ? "endpoint upstream"
+                             : upstream.get() == this->vpn->bypass_upstream.get() ? "bypass upstream"
+@@ -1485,11 +1489,17 @@ void Tunnel::on_before_endpoint_disconnect(ServerUpstream *upstream) {
+ 
+     for (uint64_t id : ids) {
+         VpnConnection *conn = vpn_connection_get_by_id(this->connections.by_client_id, id);
+         // Only the endpoint is going away. Keep independently routed sockets
+         // alive, including direct connections still waiting for their peer.
+-        // Unclassified/migrating flows must not inherit a direct route here.
++        if (conn && conn->state == CONNS_CONNECTED_MIGRATING && conn->upstream.lock() == this->fake_upstream) {
++            const auto *target = vpn_connection_get_by_id(this->connections.by_server_id, conn->migration_peer_id);
++            if (target && target->state == CONNS_WAITING_RESPONSE_MIGRATING && target->migration_peer_id == id
++                    && target->upstream.lock() == this->vpn->bypass_upstream) {
++                continue;
++            }
++        }
+         // The application's plain-DNS channel is independent of the endpoint
+         // too. Its handler routes every question separately and enforces the
+         // kill switch for VPN domains. Closing it here loses in-flight direct
+         // answers (and every question multiplexed on a TCP DNS connection).
+         if (conn != nullptr
+@@ -1669,10 +1679,24 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
+             close_client_side_connection(this, conn, -1, true);
+             break;
+         }
+ 
+         conn->state = CONNS_CONNECTED;
++        if (conn->proto == IPPROTO_TCP && conn->upstream.lock() == this->fake_upstream) {
++            // Server-first protocols cannot supply a hostname while waiting for a greeting.
++            auto *tcp = static_cast<TcpVpnConnection *>(conn);
++            tcp->first_client_data_timeout = event_loop::schedule(this->vpn->parameters.ev_loop, [this, id]() {
++                auto *pending = vpn_connection_get_by_id(this->connections.by_client_id, id);
++                if (pending && pending->state == CONNS_CONNECTED && pending->upstream.lock() == this->fake_upstream) {
++                    static_cast<TcpVpnConnection *>(pending)->first_client_data_timeout.release();
++                    log_conn(this, pending, warn, "No client data to select a route for {}. "
++                            "Set an IP or application rule for server-first protocols.",
++                            tunnel_addr_to_str(&pending->addr.dst));
++                    close_client_side_connection(this, pending, utils::AG_ETIMEDOUT, false);
++                }
++            }, std::chrono::seconds(10));
++        }
+         listener->turn_read(id, true);
+ 
+         if (std::shared_ptr<ServerUpstream> upstream = conn->upstream.lock(); upstream != nullptr) {
+             upstream->update_flow_control(conn->server_id, listener->flow_control_info(conn->client_id));
+ 
+@@ -1740,10 +1764,13 @@ void Tunnel::listener_handler(const std::shared_ptr<ClientListener> &listener, C
+             assert(0);
+             break;
+         }
+ 
+         do_health_check(upstream);
++        if (conn->proto == IPPROTO_TCP && event->length > 0) {
++            static_cast<TcpVpnConnection *>(conn)->first_client_data_timeout.reset();
++        }
+ 
+         if (conn->flags.test(CONNF_LOOKINGUP_DOMAIN)) {
+             bool migrate_to_another_upstream = false;
+             TunnelDomainLookupAction action =
+                     pass_through_domain_lookup(this, conn, DEPD_OUTGOING, event->data, event->length);
+@@ -1984,10 +2011,11 @@ bool Tunnel::update_dns_handler_parameters() {
+     }
+     return this->dns_handler->update_parameters(std::move(*parameters));
+ }
+ 
+ void Tunnel::on_network_change() {
++    this->vpn->direct_ipv6_confirmed_until = {};
+     // Preserve direct sockets only for endpoint-only recovery. After an OS
+     // network change their bound interface/address may no longer be usable;
+     // retain the existing reset behavior so applications reconnect promptly.
+     this->reset_connections(-1);
+     if (this->dns_handler) {
+diff --git a/core/test/test_tunnel.cpp b/core/test/test_tunnel.cpp
+index 6c46c95..e17e13b 100644
+--- a/core/test/test_tunnel.cpp
++++ b/core/test/test_tunnel.cpp
+@@ -217,10 +217,11 @@ public:
+         ASSERT_TRUE(redirect_upstream->init(&vpn, {&redirect_upstream_handler, this}));
+         vpn.endpoint_upstream = redirect_upstream;
+         bypass_upstream = std::make_unique<TestUpstream>();
+         ASSERT_TRUE(bypass_upstream->init(&vpn, {&bypass_upstream_handler, this}));
+         vpn.bypass_upstream = bypass_upstream;
++        vpn.direct_ipv6_confirmed_until = std::chrono::steady_clock::time_point::max();
+ 
+         client_listener = std::make_unique<TestListener>();
+         ASSERT_EQ(ClientListener::InitResult::SUCCESS, client_listener->init(&vpn, {&listener_handler, this}));
+         vpn.client_listener = client_listener;
+ 
+@@ -1731,5 +1732,106 @@ TEST_P(FreeTunnelDirectRecovery, KeepsEstablishedDirectTrafficAcrossEndpointReco
+     EXPECT_TRUE(bypass_upstream->connections.empty());
+ }
+ 
+ INSTANTIATE_TEST_SUITE_P(FreeTunnel, FreeTunnelDirectRecovery,
+         testing::Combine(testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool()));
++
++
++class HostnameRoutingTest : public TunnelTest {
++protected:
++    uint64_t request(VpnMode mode, const char *rule, const char *address) {
++        vpn.exclusions_mode = mode;
++        EXPECT_TRUE(vpn.domain_filter.update_exclusions(mode, rule));
++        auto id = vpn.listener_conn_id_generator.get();
++        dst = SocketAddress(address);
++        raise_client_connection(id);
++        tun.complete_connect_request(id, tun.finalize_connect_action({id, VPN_CA_DEFAULT, "app", 1}));
++        run_event_loop_once();
++        return id;
++    }
++};
++
++TEST_F(HostnameRoutingTest, SilentClientTimesOutUnlessRouteIsAlreadyKnown) {
++    auto id = request(VPN_MODE_SELECTIVE, "*.example", "192.0.2.1:443");
++    ASSERT_EQ(client_listener->connections[id].result, CCR_PASS);
++    tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &id);
++    vpn_event_loop_exit(ev_loop.get(), Millis{10200});
++    vpn_event_loop_run(ev_loop.get());
++    EXPECT_TRUE(bypass_upstream->connections.empty());
++    EXPECT_TRUE(redirect_upstream->connections.empty());
++    EXPECT_FALSE(client_listener->connections.contains(id));
++    EXPECT_EQ(client_listener->received_bytes, 0u);
++
++    auto control = request(VPN_MODE_GENERAL, "192.0.2.1 localhost", "192.0.2.1:443");
++    ASSERT_EQ(bypass_upstream->connections.size(), 1u);
++    auto peer = bypass_upstream->connections.back();
++    tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &peer);
++    tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &control);
++    const uint8_t greeting[] = {'H', 'i', '\n'};
++    ServerReadEvent read{peer, greeting, sizeof(greeting), 0};
++    tun.upstream_handler(bypass_upstream, SERVER_EVENT_READ, &read);
++    EXPECT_EQ(client_listener->received_bytes, sizeof(greeting));
++}
++
++class HostnameRecoveryTest : public HostnameRoutingTest, public testing::WithParamInterface<bool> {};
++TEST_P(HostnameRecoveryTest, DirectTcpWhenEndpointGoesDown) {
++    auto id = request(VPN_MODE_GENERAL, "localhost", "192.0.2.1:443");
++    ASSERT_EQ(client_listener->connections[id].result, CCR_PASS);
++    tun.listener_handler(client_listener, CLIENT_EVENT_CONNECTION_ACCEPTED, &id);
++    ClientRead read{id, CLIENT_HELLO, sizeof(CLIENT_HELLO), 0}; // SNI localhost matches the bypass rule.
++    tun.listener_handler(client_listener, CLIENT_EVENT_READ, &read);
++    ASSERT_EQ(bypass_upstream->connections.size(), 1u);
++    ASSERT_TRUE(redirect_upstream->connections.empty());
++    auto direct = bypass_upstream->connections.back();
++    if (GetParam()) {
++        tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &direct);
++    }
++    tun.on_before_endpoint_disconnect(redirect_upstream.get());
++    tun.upstream_handler(redirect_upstream, SERVER_EVENT_SESSION_CLOSED, nullptr);
++    tun.on_after_endpoint_disconnect(redirect_upstream.get());
++    run_event_loop_once();
++    ASSERT_TRUE(client_listener->connections.contains(id));
++    ASSERT_EQ(bypass_upstream->connections.size(), 1u);
++    if (!GetParam()) {
++        tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &direct);
++    }
++    run_event_loop_once();
++    EXPECT_TRUE(client_listener->connections[id].read_enabled);
++    // TCP listeners retain unconsumed bytes while reads are paused.
++    ASSERT_EQ(read.result, 0);
++    tun.listener_handler(client_listener, CLIENT_EVENT_READ, &read);
++    EXPECT_EQ(read.result, sizeof(CLIENT_HELLO));
++    EXPECT_EQ(bypass_upstream->total_sent, sizeof(CLIENT_HELLO));
++    EXPECT_TRUE(redirect_upstream->connections.empty());
++}
++INSTANTIATE_TEST_SUITE_P(Window, HostnameRecoveryTest, testing::Bool());
++
++TEST_F(LimitedIpv6Test, GeneralModeAllowsIpv4ToRace) {
++    ASSERT_TRUE(vpn.domain_filter.update_exclusions(VPN_MODE_GENERAL, "localhost"));
++    auto v6 = request("[2001:db8::1]:443");
++    auto v4 = request("192.0.2.1:443");
++    EXPECT_FALSE(client_listener->connections[v6].result);
++    EXPECT_EQ(client_listener->connections[v4].result, CCR_PASS);
++}
++
++TEST_F(LimitedIpv6Test, ColdUplinkDelaysAckUntilDirectIpv6Succeeds) {
++    vpn_network_manager_set_limited_ipv6_interface(0);
++    vpn.direct_ipv6_confirmed_until = {};
++    auto cold = request("[2001:db8::1]:443");
++    EXPECT_FALSE(client_listener->connections[cold].result);
++
++    auto direct = vpn.listener_conn_id_generator.get();
++    raise_client_connection(direct);
++    tun.complete_connect_request(direct, VPN_CA_FORCE_BYPASS);
++    ASSERT_EQ(bypass_upstream->connections.size(), 1u);
++    auto peer = bypass_upstream->connections.back();
++    tun.upstream_handler(bypass_upstream, SERVER_EVENT_CONNECTION_OPENED, &peer);
++    auto confirmed = request("[2001:db8::2]:443");
++    EXPECT_EQ(client_listener->connections[confirmed].result, CCR_PASS);
++
++    tun.on_network_change();
++    auto changed = request("[2001:db8::3]:443");
++    EXPECT_FALSE(client_listener->connections[changed].result);
++    bypass_upstream->ip_version_availability.reset(IPV4);
++    auto ipv6_only = request("[2001:db8::4]:443");
++    EXPECT_EQ(client_listener->connections[ipv6_only].result, CCR_PASS);
++}

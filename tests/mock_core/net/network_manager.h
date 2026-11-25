@@ -29,6 +29,10 @@ inline void vpn_network_manager_set_outbound_interface(uint32_t idx)
     mockcore::g_outboundInterface.store(idx);
 }
 
+inline void vpn_network_manager_set_limited_ipv6_interface(uint32_t)
+{
+}
+
 inline bool vpn_network_manager_get_tunnel_active()
 {
     return mockcore::g_tunnelActive.load();

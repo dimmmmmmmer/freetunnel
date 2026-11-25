@@ -19,6 +19,7 @@
 # enabled (add-apt-repository -s).
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "$0")" && pwd)"
 out="${1:?usage: archive-gcc-runtime-source.sh <output .tar>}"
 mkdir -p "$(dirname "$out")"
 out="$(cd "$(dirname "$out")" && pwd)/$(basename "$out")"
@@ -47,6 +48,10 @@ while IFS= read -r spec; do
   # Launchpad is sometimes slow to answer, as add-apt-repository is in build.yml.
   for attempt in 1 2 3; do
     (cd "$work" && apt-get source --download-only "$spec") && break
+    if [ "$attempt" -eq 1 ]; then
+      (cd "$work" && apt-get --print-uris -o Acquire::ForceHash=SHA256 source "$spec" |
+        bash "$script_dir/fetch-toolchain-ppa.sh" "$work") || echo "Launchpad file download failed; retrying APT" >&2
+    fi
     if [ "$attempt" -eq 3 ]; then
       echo "::error::could not download the source of $spec" >&2
       exit 1

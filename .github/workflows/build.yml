@@ -403,9 +403,14 @@ jobs:
             sleep 20
           done
           sudo apt-get update
-          # Launchpad occasionally returns HTTP 503 for a package download.
-          # Retry the fetch; a persistent failure must still fail the build.
-          sudo apt-get -o Acquire::Retries=5 install -y g++-13
+          # Launchpad's PPA pool sometimes returns 503 for only some files.
+          # Use its separate file service for those, with hashes from APT.
+          if ! sudo apt-get -o Acquire::Retries=1 install -y g++-13; then
+            set -o pipefail
+            apt-get --print-uris -o Acquire::ForceHash=SHA256 -y install g++-13 |
+              sudo bash client/scripts/fetch-toolchain-ppa.sh /var/cache/apt/archives
+            sudo apt-get install -y g++-13
+          fi
           # jammy also has GCC 11 (clang's own dependency); make sure the headers
           # clang-18 picked are 13's rather than trust the comment above.
           # clang prints the path through its own directory (/usr/bin/../lib/…),
@@ -669,6 +674,13 @@ jobs:
       - name: Build
         if: needs.changes.outputs.desktop != 'false' && matrix.platform != 'macos'
         run: cmake --build build --target FreeTunnel --config RelWithDebInfo -j 4
+
+      - name: Verify TCP split routing (Windows)
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'windows'
+        run: |
+          cmake --build build --target test_tunnel --config RelWithDebInfo -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build/core/test_tunnel.exe '--gtest_filter=LimitedIpv6Test.*:HostnameRoutingTest.*:*/HostnameRecoveryTest.*'
 
       - name: Verify core domain and DNS routing (Linux)
         if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
@@ -1017,7 +1029,8 @@ jobs:
 
           # arm64 (native) and x86_64 (cross-compiled by Apple clang).
           retry_configure "${common[@]}" -B build-arm64 -DCMAKE_OSX_ARCHITECTURES=arm64
-          cmake --build build-arm64 --target FreeTunnel -j3
+          cmake --build build-arm64 --target FreeTunnel test_tunnel -j3
+          build-arm64/core/test_tunnel --gtest_filter='LimitedIpv6Test.*:HostnameRoutingTest.*:*/HostnameRecoveryTest.*'
           retry_configure "${common[@]}" -B build-x64 -DCMAKE_OSX_ARCHITECTURES=x86_64
           cmake --build build-x64 --target FreeTunnel -j3
 

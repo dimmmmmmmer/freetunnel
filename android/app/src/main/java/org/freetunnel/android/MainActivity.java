@@ -3388,6 +3388,12 @@ public final class MainActivity extends Activity {
             // same 48, and the search box under it stays where it is.
             header.setPadding(header.getPaddingLeft(), dp(4), header.getPaddingRight(), 0);
             card.addView(header, lp(-1, -2));
+            if (through) {
+                TextView dnsHint = ui.label(getString(R.string.picker_dns_hint), 12, t().textDim);
+                LinearLayout.LayoutParams hintLp = lp(-1, -2);
+                hintLp.setMargins(dp(14), 0, dp(14), dp(10));
+                card.addView(dnsHint, hintLp);
+            }
             // Its "Search" stays while the field has the focus (the desktop's does), and starts 10 in, as the desktop's does.
             search = ui.pageInput(getString(R.string.picker_search), "picker:search", true);
             search.setPadding(dp(10), 0, dp(10), 0);

@@ -172,6 +172,7 @@
     <string name="editor_discard_question">"Закрыть без сохранения?"</string>
     <string name="editor_discard">"Не сохранять"</string>
     <string name="picker_title">"Выбор приложений"</string>
+    <string name="picker_dns_hint">"Общий системный DNS следует правилам доменов. Чтобы DNS-запросы домена шли через VPN, добавьте его в правила этого режима."</string>
     <string name="picker_search">"Поиск"</string>
     <string name="picker_scanning">"Ищем установленные приложения…"</string>
     <string name="picker_nothing">"Ничего не найдено."</string>

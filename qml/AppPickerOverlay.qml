@@ -131,6 +131,15 @@ Item {
                        color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
             }
 
+            Text {
+                Layout.fillWidth: true
+                visible: pickerRoot.targetMode === "selective"
+                text: qsTr("Shared system DNS follows domain rules. To send a domain’s DNS queries through the VPN, add it to this mode’s rules.")
+                wrapMode: Text.WordWrap
+                color: theme.textDim
+                font.pixelSize: 12
+            }
+
             Rectangle {
                 Layout.fillWidth: true; Layout.preferredHeight: 34; radius: 8
                 color: theme.inputBg; border.width: 1
