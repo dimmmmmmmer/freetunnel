@@ -172,6 +172,7 @@
     <string name="editor_discard_question">"Discard unsaved changes?"</string>
     <string name="editor_discard">"Discard"</string>
     <string name="picker_title">"Choose applications"</string>
+    <string name="picker_dns_hint">"Shared system DNS follows domain rules. To send a domain’s DNS queries through the VPN, add it to this mode’s rules."</string>
     <string name="picker_search">"Search"</string>
     <string name="picker_scanning">"Looking for installed applications…"</string>
     <string name="picker_nothing">"Nothing matches that."</string>

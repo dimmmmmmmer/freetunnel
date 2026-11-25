@@ -11,6 +11,10 @@
 <context>
     <name>AppPickerOverlay</name>
     <message>
+        <source>Shared system DNS follows domain rules. To send a domain’s DNS queries through the VPN, add it to this mode’s rules.</source>
+        <translation>Общий системный DNS следует правилам доменов. Чтобы DNS-запросы домена шли через VPN, добавьте его в правила этого режима.</translation>
+    </message>
+    <message>
         <source>Search</source>
         <translation>Поиск</translation>
     </message>

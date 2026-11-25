@@ -145,13 +145,31 @@ container's loopback: upstream treats `127/8` DNS addresses specially. Never use
 host networking for this probe. No TUN device or privileged container is needed.
 
 
+## TCP connections waiting for a hostname
+
+On a shared IP address FreeTunnel may need the HTTP host or TLS hostname before
+it can open the correct upstream. A local IPv6 TCP acknowledgement can otherwise
+make a dual-stack application abandon a working IPv4 address before any remote
+peer has replied. In either split mode, FreeTunnel delays that acknowledgement
+by up to 650 ms for global unicast IPv6 when a direct IPv4 route exists and
+direct IPv6 is unconfirmed or limited. A successful direct IPv6 TCP connection
+confirms the uplink for five minutes. A network change clears that evidence.
+The application still chooses its destination. On a healthy dual-stack network
+a first connection can consequently use IPv4.
+
+For a server-first protocol on a hostname-inspected port, give the destination
+IP or the application an explicit route so the server can send its greeting.
+If neither route can be chosen, FreeTunnel closes a silent TCP connection after
+10 seconds and records the reason in the core log. Once the client sends data,
+this deadline no longer applies.
+
 ## Direct connections during endpoint recovery
 
 An isolated native regression test reproduced unconditional closure of direct
 TCP/UDP connections in `Tunnel::on_before_endpoint_disconnect`. This happened
 even though their direct upstream and physical network were still usable.
-`13-preserve-direct-recovery.patch` retains direct connections (including a
-pending direct connect) while closing endpoint-dependent and unresolved flows.
+The core retains direct connections, including a pending direct connect selected
+from a TLS hostname, while closing endpoint-dependent and unresolved flows.
 It marks the endpoint unavailable before callbacks can initiate another flow.
 
 Tests cover both IP families, both split modes, TCP/UDP, pending and established

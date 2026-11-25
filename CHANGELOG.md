@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- On Linux, when NetworkManager reports limited IPv6 and working IPv4, applications such as Docker have time to try IPv4 while FreeTunnel determines the split-tunnel route from the TLS hostname.
+- In both split-tunnel modes, applications such as Docker can try IPv4 while FreeTunnel waits for the hostname on an unconfirmed IPv6 path.
+- Direct TCP connections can finish opening during a VPN endpoint reconnect once their hostname has selected the bypass route.
+- When a client waits for a server greeting and FreeTunnel needs a hostname to select its route, the connection now times out after 10 seconds. An IP or application rule lets the greeting through immediately.
+- The application picker explains how to route shared system DNS in Through VPN mode.
 - If a connection fails or is cancelled while FreeTunnel is selecting its final route, both sides of the pending connection are cleaned up.
 
 ## 1.3.2

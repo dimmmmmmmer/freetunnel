@@ -670,6 +670,13 @@ jobs:
         if: needs.changes.outputs.desktop != 'false' && matrix.platform != 'macos'
         run: cmake --build build --target FreeTunnel --config RelWithDebInfo -j 4
 
+      - name: Verify TCP split routing (Windows)
+        if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'windows'
+        run: |
+          cmake --build build --target test_tunnel --config RelWithDebInfo -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build/core/test_tunnel.exe '--gtest_filter=LimitedIpv6Test.*:HostnameRoutingTest.*:*/HostnameRecoveryTest.*'
+
       - name: Verify core domain and DNS routing (Linux)
         if: needs.changes.outputs.desktop != 'false' && matrix.platform == 'linux'
         shell: bash
@@ -1017,7 +1024,8 @@ jobs:
 
           # arm64 (native) and x86_64 (cross-compiled by Apple clang).
           retry_configure "${common[@]}" -B build-arm64 -DCMAKE_OSX_ARCHITECTURES=arm64
-          cmake --build build-arm64 --target FreeTunnel -j3
+          cmake --build build-arm64 --target FreeTunnel test_tunnel -j3
+          build-arm64/core/test_tunnel --gtest_filter='LimitedIpv6Test.*:HostnameRoutingTest.*:*/HostnameRecoveryTest.*'
           retry_configure "${common[@]}" -B build-x64 -DCMAKE_OSX_ARCHITECTURES=x86_64
           cmake --build build-x64 --target FreeTunnel -j3
 
