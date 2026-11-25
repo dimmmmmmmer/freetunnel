@@ -112,6 +112,7 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["picker_apply", "AppPickerOverlay", "Apply"]
 ["picker_context_changed", "Backend", "The routing mode or profile changed. Open the application picker again."]
 ["picker_search", "AppPickerOverlay", "Search"]
+["picker_dns_hint", "AppPickerOverlay", "Shared system DNS follows domain rules. To send a domain’s DNS queries through the VPN, add it to this mode’s rules."]
 ["picker_scanning", "AppPickerOverlay", "Looking for installed applications…"]
 ["picker_nothing", "AppPickerOverlay", "Nothing matches that."]
 ["split_profile", "SplitPage", "Profile"]
