@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Home shows the last minute of download and upload speeds above the speed indicators.
 - In both split-tunnel modes, applications such as Docker can try IPv4 while FreeTunnel waits for the hostname on an unconfirmed IPv6 path.
 - Direct TCP connections can finish opening during a VPN endpoint reconnect once their hostname has selected the bypass route.
 - When a client waits for a server greeting and FreeTunnel needs a hostname to select its route, the connection now times out after 10 seconds. An IP or application rule lets the greeting through immediately.

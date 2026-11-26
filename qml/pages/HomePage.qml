@@ -7,18 +7,24 @@ Item {
     required property var shell
     required property var backend
     required property var theme
+    // The speed tiles and the graph over them are one height.
+    readonly property int tileHeight: 44
 
     // How far above the bottom the window's toast sits here. In the middle of the
-    // gap between the config selector and the speed tiles when it fits there; a
-    // longer one covers the tiles, whole, and not the selector, the one thing here
-    // people click. Across the middle of the tiles, where it used to sit, it cut
-    // their labels in half.
+    // gap between the config selector and the graph over the tiles when it fits
+    // there; failing that, a one-line one over the graph, which it hides and which
+    // is no control; a longer one covers the tiles, whole, and not the selector,
+    // the one thing here people click. Across the middle of the tiles, where it
+    // used to sit, it cut their labels in half.
     function toastMargin(toastHeight) {
-        var gapBottom = speedRow.anchors.bottomMargin + speedRow.height
+        var tilesTop = speedRow.anchors.bottomMargin + speedRow.height
+        var graphTop = tilesTop + 8 + speedGraph.height
         var gapTop = height - (homeCol.parent.y + homeCol.y + homeCol.height)
-        var room = gapTop - gapBottom
-        return toastHeight + 8 <= room ? gapBottom + (room - toastHeight) / 2
-                                       : speedRow.anchors.bottomMargin
+        var room = gapTop - graphTop
+        if (toastHeight + 8 <= room)
+            return graphTop + (room - toastHeight) / 2
+        return toastHeight <= speedGraph.height ? tilesTop + 8 + (speedGraph.height - toastHeight) / 2
+                                                : speedRow.anchors.bottomMargin
     }
 
     // The picker is placed and sized when it opens; a resize would leave it
@@ -26,6 +32,67 @@ Item {
     onWidthChanged: cfgPopup.open = false
     onHeightChanged: cfgPopup.open = false
 
+    // The last minute of speeds over the tiles, as wide as both: download filled,
+    // upload a line, the newest at the right edge. A minute fills the width; until
+    // then the lines start part of the way in. The tiles say the numbers.
+    Rectangle {
+        id: speedGraph
+        objectName: "speedGraph"
+        anchors.horizontalCenter: speedRow.horizontalCenter
+        anchors.bottom: speedRow.top; anchors.bottomMargin: 8
+        width: speedRow.width
+        height: homeRoot.tileHeight
+        radius: 8; color: theme.tile
+        readonly property int capacity: 60 // a minute, a reading a second
+        Canvas {
+            id: graphCanvas
+            anchors.fill: parent
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            Connections {
+                target: homeRoot.backend
+                function onTick() { graphCanvas.requestPaint() }
+            }
+            // The theme's colours change with light and dark.
+            property color downColor: homeRoot.theme.success
+            property color upColor: homeRoot.theme.textDim
+            onDownColorChanged: requestPaint()
+            onUpColorChanged: requestPaint()
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                var down = homeRoot.backend.downHistory, up = homeRoot.backend.upHistory
+                var n = down.length
+                if (n < 2) return
+                var pad = 4
+                var left = pad, right = width - pad, top = pad, bottom = height - pad
+                var step = (right - left) / (speedGraph.capacity - 1)
+                var x0 = right - (n - 1) * step
+                var scale = homeRoot.backend.historyScale
+                function yOf(v) { return bottom - (bottom - top) * Math.min(1, v / scale) }
+                function trace(values) {
+                    ctx.beginPath()
+                    for (var i = 0; i < n; ++i) {
+                        if (i === 0) ctx.moveTo(x0, yOf(values[i]))
+                        else ctx.lineTo(x0 + i * step, yOf(values[i]))
+                    }
+                }
+                ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.lineCap = "round"
+                var c = downColor
+                // Under what came in, a faint fill down to the baseline.
+                trace(down)
+                ctx.lineTo(right, bottom); ctx.lineTo(x0, bottom); ctx.closePath()
+                ctx.fillStyle = Qt.rgba(c.r, c.g, c.b, 0x2E / 255)
+                ctx.fill()
+                trace(down)
+                ctx.strokeStyle = c
+                ctx.stroke()
+                trace(up)
+                ctx.strokeStyle = upColor
+                ctx.stroke()
+            }
+        }
+    }
     // Speed badges pinned to the bottom — independent of the logo/config block.
     RowLayout {
         id: speedRow
@@ -43,7 +110,7 @@ Item {
             Rectangle {
                 id: speedTile
                 required property var modelData
-                Layout.preferredWidth: 116; Layout.preferredHeight: 44; radius: 8; color: theme.tile
+                Layout.preferredWidth: 116; Layout.preferredHeight: homeRoot.tileHeight; radius: 8; color: theme.tile
                 Row {
                     anchors.centerIn: parent; spacing: 5
                     Text { anchors.verticalCenter: parent.verticalCenter
@@ -56,11 +123,11 @@ Item {
             }
         }
     }
-    // Logo + status + config sit above the badges; hero height follows content.
+    // Logo + status + config sit above the graph; hero height follows content.
     Item {
         anchors.left: parent.left; anchors.right: parent.right
         anchors.top: parent.top
-        anchors.bottom: speedRow.top; anchors.bottomMargin: 22
+        anchors.bottom: speedGraph.top; anchors.bottomMargin: 22
         ColumnLayout {
             id: homeCol
             anchors.horizontalCenter: parent.horizontalCenter
