@@ -4,6 +4,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QScopeGuard>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include "core/ConfigPaths.h"
@@ -12,8 +14,10 @@ class TestConfigPaths : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
     void sanitizeAndUniquePath();
     void ownerConfigPathForSaveReusesExisting();
+    void aCountedPathKeepsPercentSignsInTheNameAsTheyAre();
     void entryMatchingPrefersTheExactNameThenFoldsCase();
     void existingConfigPathFindsAnExactCollision();
     void existingConfigPathReportsNoCollisionForAFreeName();
@@ -24,6 +28,13 @@ private slots:
     void twoSpellingsAreOneFileOnlyWhereTheFileSystemSaysSo();
     void aNameNobodyTypedIsCutToTheLimit();
 };
+
+void TestConfigPaths::initTestCase()
+{
+    // The owner directory is created and written to below; keep that out of the
+    // real per-user location.
+    QStandardPaths::setTestModeEnabled(true);
+}
 
 void TestConfigPaths::sanitizeAndUniquePath()
 {
@@ -42,6 +53,33 @@ void TestConfigPaths::ownerConfigPathForSaveReusesExisting()
     const QString renamed = freetunnel::ownerConfigPathForSave(QStringLiteral("vpn-renamed"), first);
     QVERIFY(renamed.endsWith(QStringLiteral(".toml")));
     QVERIFY(renamed != first);
+}
+
+// A config name keeps its '%' (a file can hold it), and it can come from a
+// provider or a link. Chained QString::arg() calls would fill a "%2" in the name
+// with the counter, so the second import of "A%1 B%2" was saved as
+// "A2 B%2-%2.toml", and the file name is what the list shows as the config name.
+void TestConfigPaths::aCountedPathKeepsPercentSignsInTheNameAsTheyAre()
+{
+    const QString name = QStringLiteral("A%1 B%2");
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QVERIFY(QDir().mkpath(base));
+    const QString taken = QDir(base).filePath(name + QStringLiteral(".toml"));
+    const QString counted = QDir(base).filePath(name + QStringLiteral("-2.toml"));
+    QFile::remove(taken);
+    QFile::remove(counted);
+    const auto cleanUp = qScopeGuard([&] {
+        QFile::remove(taken);
+        QFile::remove(counted);
+    });
+
+    // The name is taken, so the counting branch has to pick the path.
+    QFile f(taken);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.close();
+
+    const QString path = freetunnel::uniqueOwnerConfigPath(name);
+    QVERIFY2(path.endsWith(QStringLiteral("A%1 B%2-2.toml")), qPrintable(path));
 }
 
 // The case-folding branch decides which credential a deep-link "Replace" deletes

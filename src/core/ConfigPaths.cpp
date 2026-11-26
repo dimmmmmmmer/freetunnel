@@ -139,7 +139,8 @@ QString sanitizeConfigBaseName(const QString &name, const QString &fallbackPrefi
         safe.insert(firstDot < 0 ? safe.size() : firstDot, QLatin1Char('_'));
 #endif
     if (safe.isEmpty())
-        safe = QStringLiteral("%1-%2").arg(fallbackPrefix).arg(QDateTime::currentSecsSinceEpoch());
+        safe = QStringLiteral("%1-%2").arg(fallbackPrefix,
+                                           QString::number(QDateTime::currentSecsSinceEpoch()));
     return safe;
 }
 
@@ -164,19 +165,25 @@ QString uniqueOwnerConfigPath(const QString &stem)
     // path and the second silently overwrote the first — precisely the clobbering
     // this function exists to prevent. "Work-2.toml" also reads better than an
     // epoch suffix in the config list.
+    //
+    // The stem is arg()'d together with the number, never in a chain: a chained
+    // .arg() substitutes the lowest placeholder left in the whole string, so a
+    // name that keeps a "%2" (sanitizing leaves '%' alone) would be filled in by
+    // the second call and the file would be saved under a different name.
     for (int i = 2; i < 1000; ++i) {
         const QString candidate =
-                QDir(base).filePath(QStringLiteral("%1-%2.toml").arg(stem).arg(i));
+                QDir(base).filePath(QStringLiteral("%1-%2.toml").arg(stem, QString::number(i)));
         if (!QFileInfo::exists(candidate))
             return candidate;
     }
     // Absurd number of same-named configs: fall back to something collision-proof
-    // rather than returning a path we know is taken.
-    return QDir(base).filePath(QStringLiteral("%1-%2-%3.toml")
-                                       .arg(stem)
-                                       .arg(QDateTime::currentSecsSinceEpoch())
-                                       .arg(QRandomGenerator::system()->generate(), 8, 16,
-                                            QLatin1Char('0')));
+    // rather than returning a path we know is taken. The multi-argument arg() has
+    // no field width, so the zero-padded hex is formatted first.
+    const QString random = QString::number(QRandomGenerator::system()->generate(), 16)
+                                   .rightJustified(8, QLatin1Char('0'));
+    return QDir(base).filePath(
+            QStringLiteral("%1-%2-%3.toml")
+                    .arg(stem, QString::number(QDateTime::currentSecsSinceEpoch()), random));
 }
 
 
