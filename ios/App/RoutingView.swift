@@ -125,7 +125,6 @@ struct RoutingView: View {
                             Text(viaVPN ? "Rules — via VPN" : "Rules — bypass VPN").foregroundStyle(
                                 AppStyle.faint)
                             if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                            Button("Recommended for Russia") { recommended() }
                             if !manual.wrappedValue.isEmpty {
                                 Button("Clear all") {
                                     state.confirm("Clear all domains?", actionTitle: "Clear") {
@@ -159,28 +158,11 @@ struct RoutingView: View {
             }
         }
     }
-    private func recommended() {
-        guard let url = Bundle.main.url(forResource: "recommended-russia", withExtension: "txt"),
-            let text = try? String(contentsOf: url, encoding: .utf8)
-        else { return }
-        var rules = manual.wrappedValue.split(whereSeparator: { $0.isNewline }).map(String.init)
-        for line in text.split(whereSeparator: { $0.isNewline }) {
-            let value = line.trimmingCharacters(in: .whitespaces)
-            if !value.isEmpty && !value.hasPrefix("#") && !rules.contains(value) {
-                rules.append(value)
-            }
-        }
-        manual.wrappedValue = rules.joined(separator: "\n")
-    }
 }
 struct GeoListsBlock: View {
     @ObservedObject var state: AppState
     let profileName: String
     @State private var customOpen = false
-    @State private var customName = ""
-    @State private var source = ""
-    @State private var kind: ListKind = .sites
-    @State private var direction: Direction = .vpn
     private var routing: Binding<Routing> {
         Binding(
             get: {
@@ -207,8 +189,6 @@ struct GeoListsBlock: View {
             routing.wrappedValue = value
             Task { await state.refresh(list) }
             customOpen = false
-            customName = ""
-            source = ""
         } catch { state.report(error) }
     }
     var body: some View {
@@ -237,30 +217,6 @@ struct GeoListsBlock: View {
             ForEach(routing.wrappedValue.lists) { list in
                 GeoCard(state: state, profileName: profileName, list: list)
             }
-            if customOpen {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Add your own list").font(AppStyle.heading).foregroundStyle(AppStyle.faint)
-                    Button("Cancel") { customOpen = false }
-                    LabeledField(title: "Name", text: $customName)
-                    LabeledField(
-                        title: "HTTPS address", text: $source,
-                        placeholder: "https://…/geosite.dat#category")
-                    AppPicker(
-                        title: "List type", selection: $kind,
-                        options: [.init(.sites, "Sites"), .init(.ips, "IP addresses")])
-                    AppPicker(
-                        title: "Route", selection: $direction,
-                        options: [.init(.vpn, "Through VPN"), .init(.bypass, "Bypass VPN")],
-                        previewID: "direction")
-                    Button("Add") {
-                        add(
-                            GeoList(
-                                name: customName.isEmpty ? source : customName, source: source,
-                                kind: kind,
-                                direction: direction))
-                    }
-                }.textInputAutocapitalization(.never).autocorrectionDisabled().id("custom-list")
-            }
             AppPicker(
                 title: "Update lists",
                 selection: Binding(
@@ -282,13 +238,57 @@ struct GeoListsBlock: View {
             .accessibilityHint(
                 "Updates run when iOS allows the app to work. Open the app to refresh overdue lists."
             )
-        }.onAppear {
+        }
+        .sheet(isPresented: $customOpen) {
+            CustomListSheet { list in add(list) } cancel: { customOpen = false }
+                .presentationDetents([.medium, .large])
+        }
+        .onAppear {
             #if DEBUG
                 customOpen =
                     state.isPreview
                     && ProcessInfo.processInfo.environment["FT_PREVIEW_FORM"] == "add-list"
             #endif
         }
+    }
+}
+/// The desktop's "Add your own list" dialog: name, HTTPS address, list type and route pickers.
+private struct CustomListSheet: View {
+    let add: (GeoList) -> Void
+    let cancel: () -> Void
+    @State private var name = ""
+    @State private var source = ""
+    @State private var kind: ListKind = .sites
+    @State private var direction: Direction = .vpn
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Add your own list").font(AppStyle.heading).foregroundStyle(AppStyle.faint)
+                LabeledField(title: "Name", text: $name)
+                LabeledField(
+                    title: "HTTPS address", text: $source,
+                    placeholder: "https://…/geosite.dat#category")
+                AppPicker(
+                    title: "List type", selection: $kind,
+                    options: [.init(.sites, "Sites"), .init(.ips, "IP addresses")], boxed: true)
+                AppPicker(
+                    title: "Route", selection: $direction,
+                    options: [.init(.vpn, "Through VPN"), .init(.bypass, "Bypass VPN")],
+                    boxed: true, previewID: "direction")
+                HStack {
+                    Button("Cancel", action: cancel)
+                    Spacer()
+                    Button("Add") {
+                        add(
+                            GeoList(
+                                name: name.isEmpty ? source : name, source: source, kind: kind,
+                                direction: direction))
+                    }
+                }
+            }.padding(18)
+        }
+        .background(AppStyle.background).buttonStyle(AppButtonStyle())
+        .textInputAutocapitalization(.never).autocorrectionDisabled()
     }
 }
 private struct GeoCard: View {

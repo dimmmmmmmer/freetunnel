@@ -42,6 +42,33 @@ public struct Routing: Codable, Equatable {
     public init() {}
     public static let intervals = [0, 1, 2, 5, 24]
 }
+extension GeoList {
+    /// What a new desktop install starts with (defaultGeoLists() in AppSettings.cpp): the Russian
+    /// sites and IP addresses lists, both set to bypass the VPN. Sources match data/geo/presets.json.
+    /// Ids are UUIDs because the list cache is keyed by them.
+    public static func freshInstallDefaults() -> [GeoList] {
+        [
+            GeoList(
+                name: "Russian sites",
+                source:
+                    "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat#category-ru",
+                kind: .sites, direction: .bypass),
+            GeoList(
+                name: "Russian IP addresses",
+                source:
+                    "https://github.com/runetfreedom/russia-blocked-geoip/releases/latest/download/geoip.dat#ru",
+                kind: .ips, direction: .bypass)
+        ]
+    }
+}
+extension Preferences {
+    /// Preferences for an install that never saved anything. Never applied to stored preferences.
+    public static func freshInstall() -> Preferences {
+        var preferences = Preferences()
+        preferences.splitProfiles[0].routing.lists = GeoList.freshInstallDefaults()
+        return preferences
+    }
+}
 public struct Profile: Codable, Identifiable, Equatable {
     public var id: UUID
     public var name: String
