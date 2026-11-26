@@ -196,7 +196,7 @@ final class ConfigForm {
     }
 
     // Only a literal is parsed: an address is never looked up.
-    private static boolean ipLiteral(String host) {
+    static boolean ipLiteral(String host) {
         if (IPV4.matcher(host).matches()) return true;
         if (host.indexOf(':') < 0 || !IPV6.matcher(host).matches()) return false;
         try { InetAddress.getByName(host); return true; }

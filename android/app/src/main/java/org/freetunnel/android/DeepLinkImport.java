@@ -91,7 +91,10 @@ final class DeepLinkImport {
                 || s.startsWith("https://www.trusttunnel.org/qr.html");
     }
 
-    static String subscription(String link) throws ParseException {
+    // The subscription address a link carries, with the server the same link names: what a fetch of it trusts
+    // (SubscriptionData.requestFor). Null when the link has no address. The certificate is as a link keeps it,
+    // only certificates and as PEM, so a link whose certificate holds no certificate pins nothing.
+    static SubscriptionData.Offer subscription(String link) throws ParseException {
         String payload = extractPayload(link);
         byte[] bytes;
         try { bytes = Base64.getUrlDecoder().decode(payload); }
@@ -100,7 +103,11 @@ final class DeepLinkImport {
         if (declaredVersion(bytes) > MAX_READ_VERSION) throw new ParseException(R.string.text_unsupported_link_version);
         Fields fields = decode(bytes);
         if (!fields.authKey.isEmpty()) throw new ParseException(R.string.text_this_server_needs_a_newer_trusttunnel_core);
-        return fields.subscriptionUrl;
+        if (fields.subscriptionUrl == null) return null;
+        Certificates.Kept certificate = Certificates.fromDer(fields.certificate);
+        return new SubscriptionData.Offer(fields.subscriptionUrl, new SubscriptionData.Trust(
+                fields.hostname == null ? "" : clean(fields.hostname).trim(), String.join(", ", fields.addresses),
+                certificate == null ? "" : certificate.pem));
     }
 
     static Imported parse(String link) throws ParseException {
@@ -235,15 +242,23 @@ final class DeepLinkImport {
     }
 
     private static boolean isValidSubscriptionUrl(String url) {
-        if (!url.startsWith("https://")) return false;
+        return url.startsWith("https://") && isSubscriptionText(url);
+    }
+
+    // What the desktop's parseSubscriptionUrl takes of an address before it parses
+    // it (kMaxSubscriptionUrlBytes of UTF-8, valid UTF-16, isWireText), shared with
+    // SubscriptionData.address so a link and a pasted address are held to one rule.
+    static boolean isSubscriptionText(String url) {
         if (url.getBytes(StandardCharsets.UTF_8).length > MAX_SUBSCRIPTION_URL_BYTES) return false;
         // Control characters include tab and line breaks; space characters include
         // no-break and other Unicode spaces. Together they cover all whitespace.
         // Format characters are invisible ones such as U+200B and U+202E. By code
-        // point, so one outside the BMP is not let through as two surrogates.
+        // point, so one outside the BMP is not let through as two surrogates. A
+        // surrogate left alone is no text (getBytes would turn it into "?").
         for (int i = 0; i < url.length(); ) {
             int c = url.codePointAt(i);
-            if (Character.isISOControl(c) || Character.isSpaceChar(c) || Character.getType(c) == Character.FORMAT)
+            int type = Character.getType(c);
+            if (Character.isISOControl(c) || Character.isSpaceChar(c) || type == Character.FORMAT || type == Character.SURROGATE)
                 return false;
             i += Character.charCount(c);
         }

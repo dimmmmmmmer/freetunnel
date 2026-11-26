@@ -292,4 +292,23 @@ public final class CertificatesTest {
             }
         }
     }
+
+    @Test public void splitGivesEachCertificateOfBackToBackDerAndStopsAtDamage() {
+        java.util.List<byte[]> two = Certificates.split(CertificateVectors.CHAIN_DER);
+        assertEquals(2, two.size());
+        assertArrayEquals(CertificateVectors.LEAF_DER, two.get(0));
+        assertArrayEquals(CertificateVectors.CA_DER, two.get(1));
+        assertEquals(0, Certificates.split(new byte[0]).size());
+        assertEquals(0, Certificates.split(new byte[]{0, 0, 0}).size());
+        // What comes after something that is no element is not read.
+        byte[] damaged = java.util.Arrays.copyOf(CertificateVectors.LEAF_DER, CertificateVectors.LEAF_DER.length + 3 + CertificateVectors.CA_DER.length);
+        System.arraycopy(CertificateVectors.CA_DER, 0, damaged, CertificateVectors.LEAF_DER.length + 3, CertificateVectors.CA_DER.length);
+        assertEquals(1, Certificates.split(damaged).size());
+    }
+
+    @Test public void blankIsWhatTheDesktopsTrimmedCallsEmpty() {
+        assertTrue(Certificates.blank(""));
+        assertTrue(Certificates.blank(" \n\t\r\u00a0\u2003"));
+        assertFalse(Certificates.blank(" a "));
+    }
 }

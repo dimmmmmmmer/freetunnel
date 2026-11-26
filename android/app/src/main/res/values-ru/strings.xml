@@ -282,6 +282,8 @@
     <string name="subscription_stop_question">Остановить обновления подписки?</string>
     <string name="subscription_host_changed">Подписка меняет сервер с %1$s на %2$s. Применить?</string>
     <string name="subscription_review">В подписке изменился сервер. Обновите её вручную для проверки.</string>
+    <string name="subscription_bad_pin">Не удаётся прочитать сертификат конфига; попросите у провайдера новую ссылку</string>
+    <string name="subscription_untrusted">Сертификату нет доверия; попросите у провайдера новую ссылку</string>
     <string name="editor_tls_profile">Профиль TLS</string>
     <string name="editor_tls_hint">"Только для этого сервера. Оставьте Chrome, если сервер не просит другой профиль."</string>
     <string name="picker_apply">Применить</string>
