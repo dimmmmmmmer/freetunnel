@@ -26,6 +26,7 @@ bool isTableHeader(const QString &line, QString *name);
 QList<QPair<QString, QString>> splitTomlTables(const QString &toml);
 QString normalizeBody(QString body);
 QString keyOf(const QString &line);
+QStringList keyPartsOf(const QString &line, QList<int> *starts = nullptr);
 QString unknownKeyLines(const QString &body, const QStringList &known);
 const QStringList &knownEndpointKeys();
 const QStringList &knownRootKeys();

@@ -55,8 +55,8 @@ QString describeGError(GError *error)
 {
     const QString text = QStringLiteral("libsecret: %1 (%2, code %3)")
                                  .arg(QString::fromUtf8(error->message),
-                                      QString::fromUtf8(g_quark_to_string(error->domain)))
-                                 .arg(error->code);
+                                      QString::fromUtf8(g_quark_to_string(error->domain)),
+                                      QString::number(error->code));
     g_error_free(error);
     return text;
 }

@@ -247,9 +247,92 @@ QString keyOf(const QString &line)
     return eq < 0 ? QString() : unquotedKey(t.left(eq).trimmed());
 }
 
+// The dotted parts of the key a line sets, each as unquotedKey() names it, and
+// with `starts` the offset of each part's first character (its opening quote,
+// when it has one). `"endpoint".hostname = 1` sets hostname in the table endpoint:
+// [endpoint, hostname]; `"a.b" = 1` sets one key with a dot in its name: [a.b].
+// keyOf() cannot say which, since it takes everything up to the first `=` for the
+// key, quoted or not, and a dotted key is exactly what decides whether a table of
+// ours is being defined a second time. Empty for a line that sets no key: a
+// comment, a header, a key with no `=`, an empty or unterminated part.
+static int skipSpaces(const QString &line, int i)
+{
+    while (i < line.size() && line.at(i).isSpace())
+        ++i;
+    return i;
+}
+
+static bool endsBareKeyPart(QChar c)
+{
+    return c == QLatin1Char('.') || c == QLatin1Char('=') || c == QLatin1Char('#') || c.isSpace();
+}
+
+// One part of a dotted key, from `i`, its first character: its name in `part`,
+// and the offset one past it, or -1 when there is no part there.
+static int readKeyPart(const QString &line, int i, QString *part)
+{
+    const int n = line.size();
+    const QChar c = line.at(i);
+    if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+        // endOfQuoted() ends one past the closing quote, and past the end of
+        // the line when there is none.
+        const int end = endOfQuoted(line, i);
+        if (end > n)
+            return -1;
+        *part = line.mid(i + 1, end - i - 2);
+        return end;
+    }
+    int end = i;
+    while (end < n && !endsBareKeyPart(line.at(end)))
+        ++end;
+    if (end == i)
+        return -1;
+    *part = line.mid(i, end - i);
+    return end;
+}
+
+QStringList keyPartsOf(const QString &line, QList<int> *starts)
+{
+    if (starts)
+        starts->clear();
+    QStringList parts;
+    QList<int> at;
+    const int n = line.size();
+    int i = 0;
+    for (;;) {
+        i = skipSpaces(line, i);
+        if (i >= n || line.at(i) == QLatin1Char('['))
+            return {};
+        QString part;
+        const int end = readKeyPart(line, i, &part);
+        if (end < 0)
+            return {};
+        parts << part;
+        at << i;
+        i = skipSpaces(line, end);
+        if (i >= n)
+            return {};
+        if (line.at(i) == QLatin1Char('=')) {
+            if (starts)
+                *starts = at;
+            return parts;
+        }
+        if (line.at(i) != QLatin1Char('.'))
+            return {};
+        ++i;
+    }
+}
+
 // The lines of `body` whose key this editor does not write, with any multi-line
 // value kept whole. Blank lines and comments are dropped: they belong to the key
 // they sit next to, and there is no way to tell which one that is.
+//
+// A key is also not ours when it is a dotted child of one that is, however it is
+// spelled: `endpoint.hostname = 1` or `certificate.extra = 1` is the table or the
+// key itself defined a second time, once the rebuild has written its own. TOML
+// does not let a header reopen a table a dotted key made, so keeping it left a
+// file the core refuses. A key whose first part is the name of nothing of ours
+// stays, and so does `"endpoint.hostname" = 1`, whose one part has a dot in it.
 QString unknownKeyLines(const QString &body, const QStringList &known)
 {
     QString out;
@@ -268,7 +351,8 @@ QString unknownKeyLines(const QString &body, const QStringList &known)
             keeping = false;
             continue;
         }
-        keeping = !known.contains(key);
+        const QStringList parts = keyPartsOf(line);
+        keeping = !known.contains(key) && (parts.isEmpty() || !known.contains(parts.first()));
         if (keeping)
             out += line + QLatin1Char('\n');
         advanceOpenValue(open, line);
@@ -303,10 +387,18 @@ const QStringList &knownRootKeys()
     // 1.2.2 missing a header with a comment after it (see isTableHeader) and
     // copying that table's keys up a level, password included. Not carried over,
     // they are gone after the next rewrite.
+    //
+    // And the tables it writes itself, [endpoint] and [listener.tun]. `endpoint = {
+    // ... }` or `listener.tun.mtu_size = 1` at the root would define one a second
+    // time, which TOML does not allow and the core refuses (see unknownKeyLines,
+    // which also drops any dotted spelling). What the rewrite keeps of them is
+    // read where it can be: the header's keys, and a dotted tun key at the root
+    // moved under [listener.tun] (see dottedTunLines).
     static const QStringList k = QStringList{QStringLiteral("loglevel"), QStringLiteral("vpn_mode"),
                                              QStringLiteral("killswitch_enabled"),
                                              QStringLiteral("post_quantum_group_enabled"),
-                                             QStringLiteral("dns_upstreams")}
+                                             QStringLiteral("dns_upstreams"), QStringLiteral("endpoint"),
+                                             QStringLiteral("listener")}
             + knownEndpointKeys();
     return k;
 }

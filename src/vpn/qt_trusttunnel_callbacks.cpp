@@ -143,8 +143,8 @@ QString sourceEndpoint(const ag::VpnConnectRequestSnapshot &req)
     if (src.isEmpty())
         return QStringLiteral("port %1").arg(req.src_port);
     if (src.contains(QLatin1Char(':'))) // an IPv6 address needs brackets to be read
-        return QStringLiteral("[%1]:%2").arg(src).arg(req.src_port);
-    return QStringLiteral("%1:%2").arg(src).arg(req.src_port);
+        return QStringLiteral("[%1]:%2").arg(src, QString::number(req.src_port));
+    return QStringLiteral("%1:%2").arg(src, QString::number(req.src_port));
 }
 
 // What was decided about one connection.

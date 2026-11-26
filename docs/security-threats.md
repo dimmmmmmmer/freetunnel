@@ -217,6 +217,10 @@ through UAC as before.
   beside the runtime and survives removal, preventing concurrent installers
   from locking different inodes. Debian's root package-manager scripts can
   install their already-installed runtime without a second download.
+  The files named to the update and install commands are opened with the
+  invoking user's own access (its UID and its primary and supplementary
+  groups), so root never opens, and the outcome never reveals, anything that
+  user could not read.
 - **Session boundary:** the token's opened descriptor must belong to the actual
   `SUDO_UID`, have no group/world access and have exactly one hard link. The
   existing HMAC handshake, config restrictions and GUI-disconnect shutdown are

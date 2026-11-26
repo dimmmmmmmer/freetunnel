@@ -13,7 +13,11 @@
 #include <QTemporaryDir>
 #include <QTextStream>
 
+#include <cstdlib>
+#include <vector>
+
 #include <fcntl.h>
+#include <grp.h>
 #include <pwd.h>
 #ifdef Q_OS_MACOS
 #include <pthread.h>
@@ -44,12 +48,75 @@ bool protectedDirectory(const QString &path, bool create)
     return S_ISDIR(st.st_mode) && st.st_uid == 0 && (st.st_mode & 0022) == 0;
 }
 
+// Root's identity is put back when this goes; anything short of that aborts.
+class CallerAccess {
+public:
+    explicit CallerAccess(quint32 uid) : m_rootGid(::getegid()) {
+        // Group calls need euid 0, so save root's own groups before changing.
+        const int count = ::getgroups(0, nullptr);
+        if (count < 0) return;
+        m_rootGroups.resize(static_cast<size_t>(count));
+        const int got = ::getgroups(count, m_rootGroups.data());
+        if (got < 0) return;
+        m_rootGroups.resize(static_cast<size_t>(got));
+        if (m_rootGroups.empty()) m_rootGroups.push_back(m_rootGid);
+        const passwd *pw = ::getpwuid(uid);
+        if (!pw || pw->pw_uid != uid) return;
+        // initgroups reuses NSS static buffers, so keep our own copies.
+        const QByteArray name(pw->pw_name);
+        const gid_t gid = pw->pw_gid;
+        m_changed = true;
+#ifdef Q_OS_MACOS
+        if (::initgroups(name.constData(), static_cast<int>(gid)) != 0) return;
+#else
+        if (::initgroups(name.constData(), gid) != 0) return;
+#endif
+        if (::setegid(gid) != 0 || ::seteuid(uid) != 0) return;
+        m_dropped = ::geteuid() == uid && ::getegid() == gid;
+    }
+    ~CallerAccess() {
+        if (!m_changed) return;
+        // The saved set-user-ID is 0, so seteuid(0) always works back. The user and
+        // group IDs are what must come back, or nothing more may run as root.
+        const bool back = ::seteuid(0) == 0 && ::setegid(m_rootGid) == 0;
+        if (!back || ::geteuid() != 0 || ::getegid() != m_rootGid) std::abort();
+        // Root's own supplementary groups are put back where the system lets us.
+        // Only where: macOS can report more groups than setgroups() accepts
+        // (NGROUPS_MAX, 16), and aborting there would fail every installation. With
+        // an effective user ID of 0 the list decides no access, so the caller's
+        // groups left in it grant nothing.
+#ifdef Q_OS_MACOS
+        const int restored = ::setgroups(static_cast<int>(m_rootGroups.size()), m_rootGroups.data());
+#else
+        const int restored = ::setgroups(m_rootGroups.size(), m_rootGroups.data());
+#endif
+        Q_UNUSED(restored)
+    }
+    CallerAccess(const CallerAccess &) = delete;
+    CallerAccess &operator=(const CallerAccess &) = delete;
+    bool ok() const { return m_dropped; }
+private:
+    gid_t m_rootGid = 0;
+    std::vector<gid_t> m_rootGroups;
+    bool m_changed = false; // set before the first credential change
+    bool m_dropped = false;
+};
+
 // Copy from a descriptor once, then verify/extract only the private snapshot.
 // An unprivileged caller may replace or modify its file throughout this call;
 // it cannot change the bytes after the signature/hash checks below.
-bool snapshot(const QString &source, const QString &target, qint64 limit)
+// The caller names the path, so it is opened with the caller's own access (uid,
+// primary and supplementary groups): root never opens a file, FIFO or device the
+// caller could not, and the later outcome cannot reveal one to it. Everything
+// after the open runs as root again, on the descriptor alone.
+bool snapshot(const QString &source, const QString &target, qint64 limit, quint32 caller)
 {
-    const int fd = ::open(QFile::encodeName(source).constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    const QByteArray path = QFile::encodeName(source);
+    int fd = -1;
+    {
+        const CallerAccess as(caller);
+        if (as.ok()) fd = ::open(path.constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    }
     if (fd < 0) return false;
     struct stat st{};
     QFile input;
@@ -217,8 +284,8 @@ bool installSnapshot(const QStringList &args, bool update, quint32 uid, const QT
     const QString archive = stage.path() + QStringLiteral("/archive.tar.gz");
     const QString sumsPath = stage.path() + QStringLiteral("/sums");
     const QString sigPath = stage.path() + QStringLiteral("/signature");
-    if (!snapshot(args[0], archive, kArchiveLimit) || !snapshot(args[1], sumsPath, 65536)
-        || !snapshot(args[2], sigPath, 64)) return false;
+    if (!snapshot(args[0], archive, kArchiveLimit, uid) || !snapshot(args[1], sumsPath, 65536, uid)
+        || !snapshot(args[2], sigPath, 64, uid)) return false;
     const QByteArray sums = readSmall(sumsPath);
     QString error;
     if (!verifyArchive(archive, sums, readSmall(sigPath), version(), !update, &error)) {
