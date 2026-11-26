@@ -848,7 +848,8 @@ class TvDeviceTest {
         }
     }
 
-    // Over the speed tiles, 8 above them and as wide as both, the graph of the last minute's speeds: no control, nothing to read out.
+    // Over the speed tiles, 8 above them, as wide as both and as high as one, the graph of the last minute's speeds: no control,
+    // nothing to read out.
     @Test fun theSpeedGraphIsOverTheTilesAndAsWideAsThem() {
         val a = open()
         render(a, 0)
@@ -857,6 +858,7 @@ class TvDeviceTest {
             val foot = field("homeSpeedRow").get(a) as ViewGroup
             val tiles = foot.getChildAt(foot.childCount - 1)
             assertEquals("As wide as the two tiles", tiles.width.toFloat(), graph.width.toFloat(), dp(a, 1f))
+            assertEquals("As high as a tile", tiles.height, graph.height)
             assertEquals("8 above them", dp(a, 8f), (topOf(tiles) - (topOf(graph) + graph.height)).toFloat(), dp(a, 1f))
             assertFalse("No control", graph.isFocusable || graph.isClickable)
             assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, graph.importantForAccessibility)

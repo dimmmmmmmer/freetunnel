@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Show a configuration’s QR code from its export menu to add it on another Android device.
-- Home shows the last minute of download and upload speeds above the two speed indicators.
+- Home shows the last minute of download and upload speeds above the two speed indicators, in a panel as high as each of them.
 
 ## 1.3.0
 

@@ -1378,8 +1378,9 @@ public final class MainActivity extends Activity {
     private boolean homeFresh = true;
     private boolean resumed;
     private final SpeedMeter speedMeter = new SpeedMeter();
-    // The graph's height over the speed tiles.
-    private static final int HOME_GRAPH_HEIGHT = 40;
+    // A speed tile's height, and the graph's over them: the same, so the three read as one block.
+    private static final int HOME_TILE_HEIGHT = 44;
+    private static final int HOME_GRAPH_HEIGHT = HOME_TILE_HEIGHT;
     // The last minute of speeds, for the graph over the tiles: kept across renders of Home, as the meter is, and cleared with it.
     private final SpeedHistory speedHistory = new SpeedHistory();
     private View homeGraph;
@@ -1411,9 +1412,9 @@ public final class MainActivity extends Activity {
         gap(foot, 8);
         LinearLayout speeds = row();
         speeds.setGravity(Gravity.CENTER);
-        speeds.addView(ui.speedTile(R.drawable.ic_arrow_down, t.success, down), lp(116, 44));
+        speeds.addView(ui.speedTile(R.drawable.ic_arrow_down, t.success, down), lp(116, HOME_TILE_HEIGHT));
         ui.gapH(speeds, 12);
-        speeds.addView(ui.speedTile(R.drawable.ic_arrow_up, t.textDim, up), lp(116, 44));
+        speeds.addView(ui.speedTile(R.drawable.ic_arrow_up, t.textDim, up), lp(116, HOME_TILE_HEIGHT));
         foot.addView(speeds, lp(-2, -2));
         FrameLayout.LayoutParams speedsLp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         // 44 above the window's bottom, as the desktop's are: on a TV the host is already padded by the overscan, which the desktop's
@@ -1436,7 +1437,7 @@ public final class MainActivity extends Activity {
         FrameLayout area = new FrameLayout(this);
         area.setClipChildren(false);
         FrameLayout.LayoutParams areaLp = new FrameLayout.LayoutParams(-1, -1);
-        areaLp.bottomMargin = dp(44 + 44 + 8 + HOME_GRAPH_HEIGHT + 22) - overscanY;
+        areaLp.bottomMargin = dp(44 + HOME_TILE_HEIGHT + 8 + HOME_GRAPH_HEIGHT + 22) - overscanY;
         stage.addView(area, areaLp);
         LinearLayout column = column();
         column.setGravity(Gravity.CENTER_HORIZONTAL);
