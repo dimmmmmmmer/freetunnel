@@ -290,8 +290,8 @@ struct ImportView: View {
             ) {
                 Task {
                     do {
-                        let data = try await Downloads.read(
-                            Subscription.request(source), limit: Subscription.maximumBytes)
+                        let data = try await Downloads.subscription(
+                            source, trust: document.trust)
                         self.offerImportedConfig(try Subscription.apply(data), subscription: source)
                     } catch {
                         self.report(error)

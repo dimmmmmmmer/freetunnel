@@ -230,3 +230,7 @@
 "Updates in TestFlight" = "Обновления в TestFlight";
 
 "Open TestFlight to update this app." = "Откройте TestFlight, чтобы обновить приложение.";
+
+/* Subscription fetch (pinned to the config's certificate, as on desktop and Android) */
+"subscriptionUntrusted" = "Сертификату нет доверия; попросите у провайдера новую ссылку";
+"subscriptionBadPin" = "Не удаётся прочитать сертификат конфига; попросите у провайдера новую ссылку";

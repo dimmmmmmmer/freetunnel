@@ -52,3 +52,19 @@ enum Downloads {
         return body
     }
 }
+
+extension Downloads {
+    /// A subscription's body. Pinned to the config's certificates, and connected to the
+    /// config's address, when the address is the config's own server (see
+    /// `SubscriptionRequest`); otherwise through the system. Failures that the user can act
+    /// on come back as `ClientError`s (`subscriptionUntrusted`, `subscriptionBadPin`).
+    static func subscription(_ source: String, trust: SubscriptionTrust?) async throws -> Data {
+        do {
+            return try await SubscriptionFetcher.fetch(
+                SubscriptionRequest.make(source, trust: trust),
+                unpinned: { try await read($0, limit: Subscription.maximumBytes) })
+        } catch let error as SubscriptionFetchError {
+            throw error.clientError
+        }
+    }
+}
