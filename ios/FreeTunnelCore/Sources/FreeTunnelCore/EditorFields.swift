@@ -8,6 +8,7 @@ public struct EditorFields: Equatable {
     public var username = ""
     public var password = ""
     public var proto = "http2"
+    public var tlsProfile = TlsProfiles.defaultProfile
     public var dns = ""
     public var sni = ""
     public var random = ""
@@ -24,6 +25,7 @@ public struct EditorFields: Equatable {
         username = endpoint["username"] as? String ?? ""
         password = endpoint["password"] as? String ?? ""
         proto = endpoint["upstream_protocol"] as? String ?? "http2"
+        tlsProfile = TlsProfiles.canonical(endpoint["tls_profile"] as? String ?? "") ?? TlsProfiles.defaultProfile
         dns = config.dnsUpstreams.joined(separator: ", ")
         sni = endpoint["custom_sni"] as? String ?? ""
         random = endpoint["client_random"] as? String ?? ""
@@ -43,6 +45,7 @@ public struct EditorFields: Equatable {
                             && part.allSatisfy { $0.isHexDigit }
                     })
         else { throw ClientError.invalidConfig }
+        guard let profile = TlsProfiles.canonical(tlsProfile) else { throw ClientError.invalidConfig }
         let host = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
         var root = previous?.rawTable ?? [:]
         var endpoint = previous?.endpoint ?? [:]
@@ -54,6 +57,12 @@ public struct EditorFields: Equatable {
         endpoint["username"] = username
         endpoint["password"] = password
         endpoint["upstream_protocol"] = proto
+        // Chrome is the core's default and is not written, as on the desktop.
+        if profile == TlsProfiles.defaultProfile {
+            endpoint.removeValue(forKey: "tls_profile")
+        } else {
+            endpoint["tls_profile"] = profile
+        }
         endpoint["custom_sni"] = sni.trimmingCharacters(in: .whitespacesAndNewlines)
         endpoint["client_random"] = trimmedRandom
         endpoint["has_ipv6"] = ipv6

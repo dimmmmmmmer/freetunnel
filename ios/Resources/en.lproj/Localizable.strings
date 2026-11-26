@@ -230,3 +230,8 @@
 "Updates in TestFlight" = "Updates in TestFlight";
 
 "Open TestFlight to update this app." = "Open TestFlight to update this app.";
+
+/* iOS parity: core editor, deep links, routing */
+"TLS profile" = "TLS profile";
+
+"This server only. Leave it on Chrome unless the server asks for another." = "This server only. Leave it on Chrome unless the server asks for another.";

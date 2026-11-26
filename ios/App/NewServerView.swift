@@ -20,6 +20,13 @@ struct ServerEditor: View {
             state.dialog = nil
         }
     }
+    /// Same labels as the desktop and Android pickers; browser and library names are not translated.
+    private static func tlsTitle(_ name: String) -> String {
+        [
+            "chrome": "Chrome", "chrome_canary": "Chrome Canary", "safari": "Safari",
+            "firefox": "Firefox", "okhttp": "OkHttp", "openssl": "OpenSSL", "boringssl": "BoringSSL"
+        ][name] ?? name
+    }
     var body: some View {
         AppDialog(title: profile == nil ? "New config" : "Edit config", close: close) {
             ScrollViewReader { reader in
@@ -63,6 +70,14 @@ struct ServerEditor: View {
                         HStack(alignment: .top, spacing: 10) {
                             LabeledField(title: "Custom SNI", text: $fields.sni)
                             LabeledField(title: "Client random (hex)", text: $fields.random)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            AppPicker(
+                                title: "TLS profile", selection: $fields.tlsProfile,
+                                options: TlsProfiles.choices.map { .init($0, Self.tlsTitle($0)) },
+                                boxed: true)
+                            Text("This server only. Leave it on Chrome unless the server asks for another.")
+                                .font(AppStyle.caption).foregroundStyle(AppStyle.secondary)
                         }
                         AppPicker(
                             title: "Split profile", selection: $splitProfile,

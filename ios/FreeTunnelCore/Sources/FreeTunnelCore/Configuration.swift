@@ -38,6 +38,12 @@ public struct Configuration {
                 throw ClientError.invalidConfig
             }
         }
+        if let profile = server["tls_profile"] {
+            // The core refuses a whole config for a name it does not know.
+            guard let text = profile as? String, TlsProfiles.canonical(text) != nil else {
+                throw ClientError.invalidConfig
+            }
+        }
         if let key = server["client_random_auth_key"] as? String, !key.isEmpty {
             throw ClientError.unsupportedFormat  // Stable core; do not silently omit an auth key.
         }
