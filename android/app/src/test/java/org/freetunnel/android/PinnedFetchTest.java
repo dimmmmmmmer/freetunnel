@@ -121,13 +121,24 @@ public class PinnedFetchTest {
         }
     }
 
-    @Test public void aLeafSignedByAPinnedCaIsTrustedWithOrWithoutTheCaServed() throws Exception {
+    // The desktop's pinningOnlyTheCaIsNotEnough: the server's own certificate has to be a pin, and a CA that signed it
+    // is not, however it is served.
+    @Test public void aLeafSignedByAPinnedCaIsUntrustedWithOrWithoutTheCaServedAndGetsNoRequest() throws Exception {
         TestTls.Cert ca = TestTls.make(TestTls.spec().cn("Test CA").ca());
         TestTls.Cert leaf = TestTls.make(TestTls.spec().cn(NAME).dns(NAME).signedBy(ca));
         for (List<X509Certificate> chain : Arrays.asList(Collections.singletonList(leaf.certificate), Arrays.asList(leaf.certificate, ca.certificate))) {
             try (TestTls.Server server = new TestTls.Server(leaf.keys.getPrivate(), chain, (n, seen) -> TestTls.ok(BODY))) {
-                assertEquals(BODY, text(fetch(pinned(URL, NAME, server, ca.pem()))));
+                assertEquals(SubscriptionData.FetchException.Failure.UNTRUSTED, failure(pinned(URL, NAME, server, ca.pem())));
+                assertEquals(0, server.requests.size());
             }
+        }
+    }
+
+    @Test public void aLeafIsTrustedWhenTheLeafAndItsCaAreBothPinned() throws Exception {
+        TestTls.Cert ca = TestTls.make(TestTls.spec().cn("Test CA").ca());
+        TestTls.Cert leaf = TestTls.make(TestTls.spec().cn(NAME).dns(NAME).signedBy(ca));
+        try (TestTls.Server server = new TestTls.Server(leaf.keys.getPrivate(), Arrays.asList(leaf.certificate, ca.certificate), (n, seen) -> TestTls.ok(BODY))) {
+            assertEquals(BODY, text(fetch(pinned(URL, NAME, server, leaf.pem() + ca.pem()))));
         }
     }
 
@@ -184,6 +195,45 @@ public class PinnedFetchTest {
             assertArrayEquals(cert.der(), request.pins.get(0).getEncoded());
             assertEquals(BODY, text(fetch(request)));
         }
+    }
+
+    // The deadline is a hard limit: a peer that sends a byte now and then keeps every read of the handshake alive.
+    @Test public void aServerDrippingTheHandshakeCannotStretchTheDeadline() throws Exception {
+        TestTls.Cert cert = TestTls.leaf(NAME);
+        try (java.net.ServerSocket slow = new java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
+            Thread dripper = new Thread(() -> {
+                try (java.net.Socket peer = slow.accept()) {
+                    // A record header that promises a long body, then the body a byte every 200 ms.
+                    peer.getOutputStream().write(new byte[]{0x16, 0x03, 0x03, 0x40, 0x00});
+                    for (int i = 0; i < 100; i++) {
+                        peer.getOutputStream().write(0);
+                        peer.getOutputStream().flush();
+                        Thread.sleep(200);
+                    }
+                } catch (Exception ended) { }
+            });
+            dripper.setDaemon(true);
+            dripper.start();
+            SubscriptionData.Request request = SubscriptionData.requestFor(URL, new SubscriptionData.Trust(NAME, "127.0.0.1:" + slow.getLocalPort(), cert.pem()));
+            long start = System.nanoTime();
+            try { SubscriptionData.fetch(request, NO_SYSTEM, PinnedHttps.DIRECT, 1000); fail("should have timed out"); }
+            catch (SubscriptionData.FetchException e) { fail("a slow network is not the certificate's fault"); }
+            catch (IOException expected) { }
+            long took = (System.nanoTime() - start) / 1000000;
+            assertTrue("took " + took + " ms", took < 2000);
+        }
+    }
+
+    // Once the host is the config's, whatever goes wrong in reading the config fails closed, never to the system's CAs.
+    @Test public void aConfigThatCannotBeReadPinsToNothingAndIsBadPin() throws Exception {
+        TestTls.Cert cert = TestTls.leaf(NAME);
+        SubscriptionData.Request request = SubscriptionData.requestFor(URL, new SubscriptionData.Trust(NAME, null, cert.pem()));
+        assertTrue(request.pinned);
+        assertTrue(request.pins.isEmpty());
+        DialerCount dialer = new DialerCount();
+        try { SubscriptionData.fetch(request, NO_SYSTEM, dialer, TIMEOUT_MS); fail("should be BAD_PIN"); }
+        catch (SubscriptionData.FetchException e) { assertEquals(SubscriptionData.FetchException.Failure.BAD_PIN, e.failure); }
+        assertEquals(0, dialer.calls.get());
     }
 
     @Test public void aPinnedRequestRefusesABadAddressBeforeAnythingIsDialed() throws Exception {

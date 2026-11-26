@@ -18,10 +18,10 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
-import java.security.KeyStore;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
@@ -31,6 +31,15 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,7 +48,6 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
 /**
@@ -58,16 +66,86 @@ final class PinnedHttps {
     }
 
     // No proxy, as the core uses none: a proxy would see the request, and one that is down would stop every refresh.
+    // The name is resolved with a wait of its own, as a lookup cannot be interrupted, and the connect gets what is left.
     static final Dialer DIRECT = (host, port, timeoutMs) -> {
-        Socket socket = new Socket(Proxy.NO_PROXY);
+        long end = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        InetAddress address = resolve(host, timeoutMs);
+        long left = TimeUnit.NANOSECONDS.toMillis(end - System.nanoTime());
+        if (left <= 0) throw new SocketTimeoutException("Subscription timed out");
+        // The socket is wrapped in TLS at once by get() (createSocket(raw, name, port, true)); nothing is sent on it bare.
+        Socket socket = new Socket(Proxy.NO_PROXY); // nosemgrep: java.lang.security.audit.crypto.unencrypted-socket.unencrypted-socket
         try {
-            socket.connect(new InetSocketAddress(host, port), timeoutMs);
+            socket.connect(new InetSocketAddress(address, port), (int) Math.min(left, Integer.MAX_VALUE));
             return socket;
         } catch (IOException | RuntimeException failed) {
             try { socket.close(); } catch (IOException ignored) { }
             throw failed;
         }
     };
+
+    // A number needs no lookup. A name is looked up on a thread of a small pool, and waited for no longer than timeoutMs:
+    // the lookup itself may go on after that, on a daemon thread, and ends with the system's own limit.
+    private static InetAddress resolve(String host, long timeoutMs) throws IOException {
+        if (ConfigForm.ipLiteral(host)) return InetAddress.getByName(host);
+        Future<InetAddress> lookup = resolvers().submit(() -> InetAddress.getByName(host));
+        try {
+            return lookup.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException late) {
+            lookup.cancel(true);
+            throw new SocketTimeoutException("Subscription timed out");
+        } catch (ExecutionException failed) {
+            if (failed.getCause() instanceof IOException) throw (IOException) failed.getCause();
+            throw new IOException("Address lookup failed");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new java.io.InterruptedIOException("Address lookup interrupted");
+        }
+    }
+
+    // Daemon threads that are made when needed and end when idle, shared by every fetch; made on first use.
+    private static ExecutorService resolvers;
+    private static ScheduledExecutorService watchdog;
+
+    private static synchronized ExecutorService resolvers() {
+        if (resolvers == null) resolvers = Executors.newCachedThreadPool(daemon("PinnedHttps-dns"));
+        return resolvers;
+    }
+
+    private static synchronized ScheduledExecutorService watchdog() {
+        if (watchdog == null) {
+            ScheduledThreadPoolExecutor made = new ScheduledThreadPoolExecutor(1, daemon("PinnedHttps-deadline"));
+            made.setRemoveOnCancelPolicy(true);
+            watchdog = made;
+        }
+        return watchdog;
+    }
+
+    private static java.util.concurrent.ThreadFactory daemon(String name) {
+        return task -> {
+            Thread thread = new Thread(task, name);
+            thread.setDaemon(true);
+            return thread;
+        };
+    }
+
+    // The fetch's deadline as a hard limit: a socket's timeout is for one read, so a peer that sends a byte now and then
+    // keeps a handshake or a record going for as long as it likes. At the deadline this closes the sockets, which ends
+    // any read or write that is blocked in them; get() then reports the timeout.
+    private static final class Deadline implements Runnable {
+        private final Socket raw;
+        private volatile SSLSocket ssl;
+        volatile boolean fired;
+
+        Deadline(Socket raw) { this.raw = raw; }
+
+        @Override public void run() {
+            fired = true;
+            // The socket under TLS first: closing the TLS one can wait for the reader that is blocked in it.
+            try { raw.close(); } catch (IOException ignored) { }
+            SSLSocket tls = ssl;
+            if (tls != null) try { tls.close(); } catch (IOException ignored) { }
+        }
+    }
 
     private static final int MAX_HEAD = 16 * 1024;
     private static final int MAX_LINE = 8 * 1024;
@@ -88,8 +166,9 @@ final class PinnedHttps {
         PinTrust trust = new PinTrust(request.pins, request.verifyName);
         SSLContext context;
         try {
-            // One context for each fetch, with our trust manager and no other: nothing is cached across fetches.
-            context = SSLContext.getInstance("TLS");
+            // One context for each fetch, with our trust manager and no other: nothing is cached across fetches. "TLS" is
+            // what negotiates 1.2 and 1.3 on Android's Conscrypt; a versioned name would leave 1.3 out on some versions.
+            context = SSLContext.getInstance("TLS"); // nosemgrep: java.lang.security.audit.weak-ssl-context.weak-ssl-context
             context.init(null, new TrustManager[]{trust}, null);
         } catch (GeneralSecurityException unavailable) {
             throw new IOException("TLS is unavailable");
@@ -98,9 +177,13 @@ final class PinnedHttps {
         int port = request.connectHost != null ? request.connectPort : SubscriptionData.port(uri);
         String name = SubscriptionData.hostKey(request.verifyName);
         Socket raw = dialer.connect(host, port, SubscriptionData.remaining(deadline));
+        Deadline limit = new Deadline(raw);
+        ScheduledFuture<?> timer = null;
         SSLSocket ssl = null;
         try {
+            timer = watchdog().schedule(limit, SubscriptionData.remaining(deadline), TimeUnit.MILLISECONDS);
             ssl = (SSLSocket) context.getSocketFactory().createSocket(raw, name, port, true);
+            limit.ssl = ssl;
             SSLParameters parameters = ssl.getSSLParameters();
             // The SNI is the server's name, not the address connected to. No SNI names an IP number (RFC 6066), and a
             // name that is not a valid one is sent without. No endpoint identification algorithm is set: the name is
@@ -120,7 +203,14 @@ final class PinnedHttps {
             out.write(requestBytes(uri, authorization));
             out.flush();
             return readReply(new Wire(ssl.getInputStream(), ssl, deadline));
+        } catch (SubscriptionData.FetchException refused) {
+            throw refused;
+        } catch (IOException failed) {
+            // What the closed sockets say is not what happened: the time was up.
+            if (limit.fired) throw new IOException("Subscription timed out");
+            throw failed;
         } finally {
+            if (timer != null) timer.cancel(false);
             // Closing the TLS socket closes the one under it; when there is none yet, the raw one is closed alone.
             try { (ssl != null ? ssl : raw).close(); } catch (IOException ignored) { }
         }
@@ -310,11 +400,10 @@ final class PinnedHttps {
     // ---- Trust ----
 
     /**
-     * What the desktop's pinning accepts (SubscriptionFetcher): the desktop gives the pins to the TLS library as its
-     * only CAs, so a chain that checks out to a pin used as a CA is accepted, and, whatever the library says of a
-     * chain's trust, the server's own certificate being one of the pins and in its dates is enough. In both, the
-     * certificate also has to be for a server and for the name; a CA that signed it, a pin or not, never is enough for
-     * a name that does not match.
+     * What the desktop's pinning accepts (SubscriptionFetcher isPinned, onSslErrors and onEncrypted): the server's own
+     * certificate is byte for byte one of the pins and in its dates. A CA that signed it is not enough, one of the pins
+     * or one the system trusts, so a pin is never used as a CA; a chain is not built at all. The certificate also has to
+     * be for a server and for the name, as the desktop's TLS checks them.
      *
      * <p>No revocation is checked: neither the JVM's nor Android's default trust manager does unless asked, and the
      * pins are the config's own, not a public CA's, which have nowhere to say so.
@@ -337,7 +426,7 @@ final class PinnedHttps {
 
         @Override public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
             try {
-                vet(chain, authType);
+                vet(chain);
             } catch (CertificateException refusal) {
                 refused = true;
                 throw refusal;
@@ -349,40 +438,18 @@ final class PinnedHttps {
 
         @Override public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
 
-        private void vet(X509Certificate[] chain, String authType) throws CertificateException {
+        private void vet(X509Certificate[] chain) throws CertificateException {
             if (chain == null || chain.length == 0) throw new CertificateException("No certificate");
             X509Certificate leaf = chain[0];
             leaf.checkValidity(new Date());
             boolean isPin = false;
             byte[] der = leaf.getEncoded();
             for (X509Certificate pin : pins) isPin |= Arrays.equals(der, pin.getEncoded());
-            if (!isPin) anchoredAtAPin(chain, authType);
+            if (!isPin) throw new CertificateException("Not a pinned certificate");
             List<String> usage = leaf.getExtendedKeyUsage();
             if (usage != null && !usage.contains(SERVER_AUTH) && !usage.contains(ANY_USAGE))
                 throw new CertificateException("Not a server certificate");
             if (!nameMatches(leaf, verifyName)) throw new CertificateException("Wrong name");
-        }
-
-        // The chain checked as the platform checks any, with the pins as the only trust anchors. That builds the chain
-        // and checks the dates and signatures; it checks no host name, which is nameMatches's.
-        private void anchoredAtAPin(X509Certificate[] chain, String authType) throws CertificateException {
-            try {
-                KeyStore store = KeyStore.getInstance(KeyStore.getDefaultType());
-                store.load(null, null);
-                for (int i = 0; i < pins.size(); i++) store.setCertificateEntry("pin" + i, pins.get(i));
-                TrustManagerFactory factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-                factory.init(store);
-                for (TrustManager manager : factory.getTrustManagers()) {
-                    if (!(manager instanceof X509TrustManager)) continue;
-                    ((X509TrustManager) manager).checkServerTrusted(chain, authType);
-                    return;
-                }
-                throw new CertificateException("No trust manager");
-            } catch (CertificateException refusal) {
-                throw refusal;
-            } catch (GeneralSecurityException | IOException broken) {
-                throw new CertificateException("Pins unusable", broken);
-            }
         }
     }
 

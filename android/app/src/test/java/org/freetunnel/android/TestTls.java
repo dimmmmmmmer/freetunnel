@@ -185,7 +185,8 @@ final class TestTls {
             store.setKeyEntry("server", key, "test".toCharArray(), chain.toArray(new X509Certificate[0]));
             KeyManagerFactory keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
             keys.init(store, "test".toCharArray());
-            SSLContext context = SSLContext.getInstance("TLS");
+            // "TLS" is what negotiates 1.2 and 1.3 on every JVM and on Conscrypt; the server here is for the tests alone.
+            SSLContext context = SSLContext.getInstance("TLS"); // nosemgrep: java.lang.security.audit.weak-ssl-context.weak-ssl-context
             context.init(keys.getKeyManagers(), null, null);
             socket = (SSLServerSocket) context.getServerSocketFactory().createServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
             thread = new Thread(this::serve, "TestTls server");

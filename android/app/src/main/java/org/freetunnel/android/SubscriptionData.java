@@ -120,15 +120,22 @@ final class SubscriptionData {
      * address's host is the config's hostname, in ACE form and in any case, and the config pins a certificate, the
      * fetch trusts that certificate alone and connects to the config's first address, as the core does: the
      * endpoint's name need not resolve and its certificate is often self-signed. A subdomain of the hostname is
-     * another host and is not pinned. Never throws: an address that is none is not pinned, and the fetch refuses it.
+     * another host and is not pinned. Never throws: an address that is none is not pinned, and the fetch refuses it; once the host matches, a
+     * failure to read the config's certificates or address pins the fetch to none, which it refuses (BAD_PIN).
      */
     static Request requestFor(String source, Trust trust) {
         Request plain = new Request(source, false, Collections.<X509Certificate>emptyList(), "", null, -1);
+        if (trust == null || Certificates.blank(trust.certificate)) return plain;
         try {
-            if (trust == null || Certificates.blank(trust.certificate)) return plain;
             String host = new URI(source).getHost();
             if (host != null && host.startsWith("[") && host.endsWith("]")) host = host.substring(1, host.length() - 1);
             if (host == null || host.isEmpty() || !hostKey(host).equals(hostKey(trust.hostname))) return plain;
+        } catch (Exception notAnAddress) {
+            return plain;
+        }
+        // The host is the config's: from here the fetch is pinned, and a failure is never a reason to fall back to the
+        // system's CAs. Pins that cannot be read are none, which the fetch refuses as BAD_PIN before dialing.
+        try {
             List<X509Certificate> pins = pinsFrom(trust.certificate);
             // The first address the core could use. Without one, the address's own host: still pinned.
             String first = trust.addresses.split(",", -1)[0].trim();
@@ -141,8 +148,8 @@ final class SubscriptionData {
                 if (!name.isEmpty()) { connectHost = name; connectPort = Integer.parseInt(first.substring(colon + 1)); }
             }
             return new Request(source, true, pins, trust.hostname, connectHost, connectPort);
-        } catch (Exception notAnAddress) {
-            return plain;
+        } catch (Exception unusable) {
+            return new Request(source, true, Collections.<X509Certificate>emptyList(), trust.hostname, null, -1);
         }
     }
 
