@@ -73,8 +73,10 @@ with tempfile.TemporaryDirectory() as temporary:
     corrupted.write_bytes(b"x" * 64)
     run(fixture, "--install-helper", initial[0], initial[1], corrupted, *initial[3:], success=False)
     # The installer opens the named files as the given user, not as root: a
-    # root-only file must be refused without touching the signature check.
-    probe = Path("/root/probe")
+    # root-only file must be refused without touching the signature check. It
+    # sits where the user can reach it, so that it is the file's own permissions
+    # that refuse it and not /root on the way.
+    probe = work / "rootonly.sig"
     probe.write_bytes(b"p" * 64)
     probe.chmod(0o600)
     denied = run(fixture, "--install-helper", initial[0], initial[1], probe, *initial[3:], success=False)
@@ -152,7 +154,7 @@ with tempfile.TemporaryDirectory() as temporary:
     # exists: a present root-only file and a missing one fail identically, and
     # neither gets as far as the signature check. The control proves that a
     # file the user can read does reach it.
-    missing = Path("/root/missing")
+    missing = work / "missing.sig"
     assert not missing.exists()
     unreadable = [as_user("helper-a", "update", *update[:2], path, *update[3:], success=False)
                   for path in (probe, missing)]
@@ -181,14 +183,15 @@ with tempfile.TemporaryDirectory() as temporary:
 
     # Supplementary groups count: a signature readable only through a group
     # helper-a has been added to must be accepted.
-    if shutil.which("groupadd") and shutil.which("usermod"):
-        run("groupadd", "ft-share")
-        run("usermod", "-aG", "ft-share", "helper-a")
-        shared = package("1.2.7", "shared", b"\nshared group runtime\n")
-        os.chown(shared[2], 0, grp.getgrnam("ft-share").gr_gid)
-        shared[2].chmod(0o640)
-        as_user("helper-a", "update", *shared)
-        assert digest(installed) == shared[3]
+    # Required, not skipped: without them this case would pass by not running.
+    assert shutil.which("groupadd") and shutil.which("usermod"), "groupadd and usermod are required"
+    run("groupadd", "ft-share")
+    run("usermod", "-aG", "ft-share", "helper-a")
+    shared = package("1.2.7", "shared", b"\nshared group runtime\n")
+    os.chown(shared[2], 0, grp.getgrnam("ft-share").gr_gid)
+    shared[2].chmod(0o640)
+    as_user("helper-a", "update", *shared)
+    assert digest(installed) == shared[3]
     as_user("helper-a", *start)
     run(installed, "--authorize-helper", "1002")
     as_user("helper-b", "check")

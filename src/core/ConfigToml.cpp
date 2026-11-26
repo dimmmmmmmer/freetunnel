@@ -221,19 +221,21 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     return t;
 }
 
-// The tun settings a file set from the root with dotted keys, as
-// `listener.tun.mtu_size = 1400` or `listener . "tun" . excluded_routes = [...]`,
-// each written as the key of [listener.tun] it means, with a value that runs over
-// several lines kept whole. They are not carried over at the root, where the
-// [listener.tun] the rebuild writes would define the table a second time; moved,
-// the file keeps the routing it asked for. An inline `listener.tun = { ... }` or
-// `listener = { tun = { ... } }` is not moved: it is dropped, and the defaults
-// are written, as for a file that said nothing.
-static QString dottedTunLines(const QString &rootBody) {
+// The tun settings a file set with dotted keys, as `listener.tun.mtu_size = 1400`
+// or `listener . "tun" . excluded_routes = [...]` at the root, or `tun.mtu_size =
+// 1400` under [listener]: `prefix` is the parts that lead to the tun table from the
+// table `body` is of. Each is written as the key of [listener.tun] it means, with a
+// value that runs over several lines kept whole. They are not carried over where
+// they were, where the [listener.tun] the rebuild writes would define the table a
+// second time; moved, the file keeps the routing it asked for. An inline
+// `listener.tun = { ... }` or `tun = { ... }` is not moved: it is dropped, and the
+// defaults are written, as for a file that said nothing.
+static QString dottedTunLines(const QString &body, const QStringList &prefix) {
     QString out;
     OpenValue open;
     bool moving = false;
-    const QStringList lines = rootBody.split(QLatin1Char('\n'));
+    const qsizetype depth = prefix.size();
+    const QStringList lines = body.split(QLatin1Char('\n'));
     for (const QString &line : lines) {
         if (open.open()) {
             if (moving)
@@ -243,10 +245,9 @@ static QString dottedTunLines(const QString &rootBody) {
         }
         QList<int> starts;
         const QStringList parts = keyPartsOf(line, &starts);
-        moving = parts.size() >= 3 && parts.at(0) == QLatin1String("listener")
-                && parts.at(1) == QLatin1String("tun");
+        moving = parts.size() > depth && parts.mid(0, depth) == prefix;
         if (moving)
-            out += line.mid(starts.at(2)) + QLatin1Char('\n');
+            out += line.mid(starts.at(depth)) + QLatin1Char('\n');
         advanceOpenValue(open, line);
     }
     return out;
@@ -256,25 +257,33 @@ static QString dottedTunLines(const QString &rootBody) {
 // it back. Without this the round trip is lossy in a way nobody sees: the file
 // still parses, still connects, and quietly routes differently.
 static void carryOverUnknownTables(const QList<QPair<QString, QString>> &tables, ConfigToml &c) {
+    // A file with a [listener.tun] header and dotted tun keys besides is one the
+    // core refuses; the header is the one kept, wherever in the file it is.
+    bool tunHeader = false;
     for (const auto &table : tables) {
         const QString &header = table.first;
         const QString &body = table.second;
         if (header.isEmpty()) {
             c.extraRootKeys = unknownKeyLines(body, knownRootKeys());
-            // The root is the first table, so a [listener.tun] header of the
-            // file, which comes after it, replaces this below: a file that has
-            // both is one the core refuses, and the header is the one to keep.
-            c.tunSection = normalizeBody(dottedTunLines(body));
+            if (!tunHeader)
+                c.tunSection = normalizeBody(dottedTunLines(
+                        body, {QStringLiteral("listener"), QStringLiteral("tun")}));
         } else if (header == QLatin1String("endpoint")) {
             c.extraEndpointKeys = unknownKeyLines(body, knownEndpointKeys());
         } else if (header == QLatin1String("listener.tun")) {
             c.tunSection = normalizeBody(body);
-        } else if (header == QLatin1String("listener") || header.startsWith(QLatin1String("listener."))) {
+            tunHeader = true;
+        } else if (header == QLatin1String("listener")) {
+            // [listener] itself holds nothing else the core reads, but its
+            // `tun.mtu_size = 1400` is [listener.tun]'s, spelled the other way.
+            const QString moved = normalizeBody(dottedTunLines(body, {QStringLiteral("tun")}));
+            if (!tunHeader && !moved.isEmpty())
+                c.tunSection = moved;
+        } else if (header.startsWith(QLatin1String("listener."))) {
             // Every other listener is left out. FreeTunnel runs the tunnel, and
             // buildConfigToml() always writes [listener.tun]: a [listener.socks]
             // kept beside it, as TrustTunnel's own client sets up a local proxy,
             // named two listeners, and the core refuses such a config outright.
-            // [listener] itself holds nothing else the core reads.
         } else {
             c.extraSections += QStringLiteral("\n[%1]\n").arg(header) + normalizeBody(body);
         }

@@ -50,6 +50,8 @@ private slots:
     void aRootDottedKeyForAWrittenTableIsNotKept();
     void aRootDottedTunKeyMovesUnderTheTunTable();
     void aTunHeaderWinsOverRootDottedTunKeys();
+    void aListenerTableDottedTunKeyMovesUnderTheTunTable();
+    void aTunHeaderWinsOverListenerDottedTunKeysWhereverItIs();
 
     // TrustTunnel 1.3 configs.
     void theSubscriptionTableIsLeftOut();
@@ -1810,6 +1812,53 @@ void TestConfigToml::aTunHeaderWinsOverRootDottedTunKeys()
     const QString rebuilt = buildConfigToml(c);
     QVERIFY2(!rebuilt.contains(QStringLiteral("1400")), qPrintable(rebuilt));
     QCOMPARE(rebuilt.count(QStringLiteral("[listener.tun]")), 1);
+}
+
+// The same keys under [listener], as `tun.mtu_size = 1400`: [listener.tun]'s, as
+// the root's dotted ones are, and moved under its header in the same way.
+void TestConfigToml::aListenerTableDottedTunKeyMovesUnderTheTunTable()
+{
+    const QString src = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n"
+            "\n[listener]\n"
+            "tun.mtu_size = 1400\n"
+            "\"tun\" . excluded_routes = [\n"
+            "  \"10.9.0.0/16\",\n"
+            "]\n"
+            "socks.address = \"127.0.0.1:1080\"\n");
+
+    const ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.tunSection,
+             QStringLiteral("mtu_size = 1400\nexcluded_routes = [\n  \"10.9.0.0/16\",\n]\n"));
+    const QString rebuilt = buildConfigToml(c);
+    QCOMPARE(rebuilt.count(QStringLiteral("[listener.tun]")), 1);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("[listener]")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("tun.")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("127.0.0.1:1080")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("\n[listener.tun]\nmtu_size = 1400\nexcluded_routes = [\n")),
+             qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("192.168.0.0/16")), qPrintable(rebuilt));
+    QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
+}
+
+// A [listener.tun] header before [listener] is kept as well as one after it.
+void TestConfigToml::aTunHeaderWinsOverListenerDottedTunKeysWhereverItIs()
+{
+    const QString head = QStringLiteral(
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n");
+    const QString table = QStringLiteral("\n[listener.tun]\nmtu_size = 1280\n");
+    const QString dotted = QStringLiteral("\n[listener]\ntun.mtu_size = 1400\n");
+    for (const QString &src : {head + table + dotted, head + dotted + table}) {
+        const ConfigToml c = parseConfigToml(src);
+        QCOMPARE(c.tunSection, QStringLiteral("mtu_size = 1280\n"));
+        QVERIFY2(!buildConfigToml(c).contains(QStringLiteral("1400")), qPrintable(buildConfigToml(c)));
+    }
 }
 
 QTEST_MAIN(TestConfigToml)
