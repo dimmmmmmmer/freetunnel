@@ -244,3 +244,8 @@
 "QR code" = "QR code";
 
 "Hidden while the screen is being shared" = "Hidden while the screen is being shared";
+
+/* iOS parity: core editor, deep links, routing */
+"TLS profile" = "TLS profile";
+
+"This server only. Leave it on Chrome unless the server asks for another." = "This server only. Leave it on Chrome unless the server asks for another.";

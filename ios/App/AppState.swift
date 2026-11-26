@@ -71,10 +71,16 @@ import VpnClientFramework
                 return
             }
         #endif
+        var seededLists: [GeoList] = []
         do {
             let path = try Identity.directory().appendingPathComponent("preferences.json")
             if FileManager.default.fileExists(atPath: path.path) {
                 preferences = try decoder.decode(Preferences.self, from: Data(contentsOf: path))
+            } else if !UITestSupport.enabled {
+                // Nothing was ever saved: start with the desktop's default geo lists. Saved
+                // preferences, even with empty lists, are never touched.
+                preferences = Preferences.freshInstall()
+                seededLists = preferences.splitProfiles[0].routing.lists
             }
             for profile in preferences.splitProfiles {
                 for list in profile.routing.lists {
@@ -86,6 +92,10 @@ import VpnClientFramework
                 }
             }
             loaded = true
+            if !seededLists.isEmpty {
+                persist()
+                Task { for list in seededLists { await refresh(list) } }
+            }
         } catch { message = ClientError.storageFailed.rawValue }
     }
     func report(_ error: Error) {

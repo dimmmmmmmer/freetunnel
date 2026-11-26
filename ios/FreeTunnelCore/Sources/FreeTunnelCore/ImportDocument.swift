@@ -66,6 +66,12 @@ public enum ImportDocument {
         if let prefix = endpoint.removeValue(forKey: "client_random_prefix") {
             endpoint["client_random"] = prefix
         }
+        if let profile = endpoint["tls_profile"] {
+            guard let value = profile as? String, let name = TlsProfiles.canonical(value) else {
+                throw ClientError.invalidConfig
+            }
+            endpoint["tls_profile"] = name
+        }
         if let random = endpoint["client_random"] {
             guard let value = random as? String else { throw ClientError.invalidConfig }
             endpoint["client_random"] = try Subscription.clientRandom(value)
@@ -165,6 +171,13 @@ public enum ImportDocument {
             let value = try number(bytes)
             guard value == 1 || value == 2 else { throw ClientError.unsupportedFormat }
             endpoint["upstream_protocol"] = value == 1 ? "http2" : "http3"
+        }
+        if let bytes = records[16] {
+            // One byte, 0x00...0x06; anything else is damage, as on the desktop.
+            guard bytes.count == 1, let name = TlsProfiles.fromByte(bytes[0]) else {
+                throw ClientError.invalidConfig
+            }
+            if name != TlsProfiles.defaultProfile { endpoint["tls_profile"] = name }
         }
         if let bytes = records[8] { endpoint["certificate"] = try certificates(bytes) }
         if let bytes = records[13] { endpoint["dns_upstreams"] = try dnsServers(bytes) }

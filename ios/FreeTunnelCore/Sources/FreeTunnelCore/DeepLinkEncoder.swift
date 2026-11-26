@@ -42,6 +42,7 @@ public enum DeepLinkEncoder {
         let certificate = try certificates(fields.certificate)
         if !certificate.isEmpty { entry(8, certificate) }
         if fields.proto == "http3" { entry(9, varint(2)) }
+        if let byte = TlsProfiles.byte(fields.tlsProfile) { entry(16, Data([byte])) }
         if !fields.random.isEmpty { text(11, fields.random) }
         if !fields.name.isEmpty { text(12, fields.name) }
         return result
