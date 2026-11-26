@@ -1974,10 +1974,13 @@ public final class MainActivity extends Activity {
         scroll.setFocusable(false);
         scroll.addView(body);
         card.addView(scroll, lp(-1, -2));
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        // The code holds the password. showOverlay returns the card that is up, and drops this onClose, when there is one: only a
+        // new card holds the flag, and closing it leaves it to any other card that holds it too.
+        boolean opening = overlay("qr") == null;
+        if (opening) secureWindowAcquire();
         Overlay overlay = showOverlay("qr", OverlayLayer.Kind.CARD, card, null, () -> {
             code.setImageDrawable(null);
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            if (opening) secureWindowRelease();
         });
         overlay.width(cardWidth);
         overlay.defaultKey = "qr:back";
