@@ -91,3 +91,53 @@ final class SubscriptionRequestTests: XCTestCase {
         XCTAssertEqual(SubscriptionTrust(toml: "garbage"), .none)
     }
 }
+
+final class ImportTrustTests: XCTestCase {
+    func link(_ fields: [(Int, [UInt8])]) -> String {
+        var out = [UInt8]()
+        for (tag, value) in fields { out += [UInt8(tag), UInt8(value.count)] + value }
+        return "tt://?" + Data(out).base64EncodedString().replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    }
+    func testASubscriptionOnlyLinkCarriesTheServerItNames() throws {
+        let text = link([
+            (0, [2]), (1, Array("vpn.test".utf8)),
+            (14, Array("https://vpn.test/sub".utf8))
+        ])
+        let document = try ImportDocument.parse(text)
+        XCTAssertNil(document.toml)
+        XCTAssertEqual(document.subscription, "https://vpn.test/sub")
+        XCTAssertEqual(document.trust?.hostname, "vpn.test")
+        XCTAssertEqual(document.trust?.addresses, "")
+        XCTAssertEqual(document.trust?.certificate, "")
+    }
+    func testALinkWithAServerAndASubscriptionCarriesItsAddresses() throws {
+        let text = link([
+            (0, [2]), (1, Array("vpn.test".utf8)), (5, Array("u".utf8)), (6, Array("p".utf8)),
+            (2, Array("1.2.3.4:443".utf8)), (2, Array("5.6.7.8:443".utf8)),
+            (14, Array("https://vpn.test/sub".utf8))
+        ])
+        let document = try ImportDocument.parse(text)
+        XCTAssertNotNil(document.toml)
+        XCTAssertEqual(document.trust?.addresses, "1.2.3.4:443, 5.6.7.8:443")
+        XCTAssertEqual(document.trust?.hostname, "vpn.test")
+    }
+    func testATomlSubscriptionComesWithTheServerItNames() throws {
+        let toml = """
+            [endpoint]
+            hostname = "vpn.test"
+            addresses = ["127.0.0.1:8443"]
+            username = "u"
+            password = "p"
+            subscription_url = "https://vpn.test/sub"
+            certificate = '''\n\(TestPKI.leafPEM)'''
+            """
+        let document = try ImportDocument.parse(toml)
+        XCTAssertEqual(document.subscription, "https://vpn.test/sub")
+        XCTAssertEqual(document.trust?.hostname, "vpn.test")
+        XCTAssertEqual(document.trust?.addresses, "127.0.0.1:8443")
+        XCTAssertTrue(SubscriptionRequest.make("https://vpn.test/sub", trust: document.trust).pinned)
+        // Without a subscription there is nothing to trust it with.
+        XCTAssertNil(try ImportDocument.parse(toml.replacingOccurrences(of: "subscription_url = \"https://vpn.test/sub\"\n", with: "")).trust)
+    }
+}
