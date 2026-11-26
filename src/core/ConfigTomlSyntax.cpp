@@ -255,6 +255,42 @@ QString keyOf(const QString &line)
 // key, quoted or not, and a dotted key is exactly what decides whether a table of
 // ours is being defined a second time. Empty for a line that sets no key: a
 // comment, a header, a key with no `=`, an empty or unterminated part.
+static int skipSpaces(const QString &line, int i)
+{
+    while (i < line.size() && line.at(i).isSpace())
+        ++i;
+    return i;
+}
+
+static bool endsBareKeyPart(QChar c)
+{
+    return c == QLatin1Char('.') || c == QLatin1Char('=') || c == QLatin1Char('#') || c.isSpace();
+}
+
+// One part of a dotted key, from `i`, its first character: its name in `part`,
+// and the offset one past it, or -1 when there is no part there.
+static int readKeyPart(const QString &line, int i, QString *part)
+{
+    const int n = line.size();
+    const QChar c = line.at(i);
+    if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+        // endOfQuoted() ends one past the closing quote, and past the end of
+        // the line when there is none.
+        const int end = endOfQuoted(line, i);
+        if (end > n)
+            return -1;
+        *part = line.mid(i + 1, end - i - 2);
+        return end;
+    }
+    int end = i;
+    while (end < n && !endsBareKeyPart(line.at(end)))
+        ++end;
+    if (end == i)
+        return -1;
+    *part = line.mid(i, end - i);
+    return end;
+}
+
 QStringList keyPartsOf(const QString &line, QList<int> *starts)
 {
     if (starts)
@@ -264,40 +300,24 @@ QStringList keyPartsOf(const QString &line, QList<int> *starts)
     const int n = line.size();
     int i = 0;
     for (;;) {
-        while (i < n && line.at(i).isSpace())
-            ++i;
+        i = skipSpaces(line, i);
         if (i >= n || line.at(i) == QLatin1Char('['))
             return {};
-        const int start = i;
-        const QChar c = line.at(i);
-        if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
-            // endOfQuoted() ends one past the closing quote, and past the end of
-            // the line when there is none.
-            const int end = endOfQuoted(line, i);
-            if (end > n)
-                return {};
-            parts << line.mid(i + 1, end - i - 2);
-            i = end;
-        } else {
-            while (i < n && line.at(i) != QLatin1Char('.') && line.at(i) != QLatin1Char('=')
-                   && line.at(i) != QLatin1Char('#') && !line.at(i).isSpace())
-                ++i;
-            if (i == start)
-                return {};
-            parts << line.mid(start, i - start);
-        }
-        at << start;
-        while (i < n && line.at(i).isSpace())
-            ++i;
+        QString part;
+        const int end = readKeyPart(line, i, &part);
+        if (end < 0)
+            return {};
+        parts << part;
+        at << i;
+        i = skipSpaces(line, end);
         if (i >= n)
             return {};
-        const QChar next = line.at(i);
-        if (next == QLatin1Char('=')) {
+        if (line.at(i) == QLatin1Char('=')) {
             if (starts)
                 *starts = at;
             return parts;
         }
-        if (next != QLatin1Char('.'))
+        if (line.at(i) != QLatin1Char('.'))
             return {};
         ++i;
     }
