@@ -649,7 +649,51 @@ class UiTourDeviceTest {
             onMain { method("showToast", CharSequence::class.java).invoke(act(), act().getString(R.string.config_added, configNames[0])) }
             shot("home-toast", "A toast on Home, between the selector and the speed tiles")
         }
+        screen("home-speed-graph") { captureSpeedGraph() }
         tourVpnStates()
+    }
+
+    // A full minute of sample counters independent of the live endpoint's reconnect timer.
+    // The separate VPN tour below exercises the actual service.
+    private fun captureSpeedGraph() {
+        goTo(0)
+        val a = act()
+        val originalState = onMain { field("vpnState").getInt(a) }
+        val originalStart = onMain { field("homeSeenUpAt").getLong(a) }
+        try {
+            onMain {
+                field("vpnState").setInt(a, 2)
+                field("homeSeenUpAt").setLong(a, SystemClock.elapsedRealtime() - 60_000)
+                method("render").invoke(a)
+                val meter = field("speedMeter").get(a) as SpeedMeter
+                val history = field("speedHistory").get(a) as SpeedHistory
+                history.clear()
+                meter.reset()
+                var rx = 0L
+                var tx = 0L
+                meter.sample(rx, tx, 0)
+                for (second in 1..SpeedHistory.CAPACITY) {
+                    val burst = if (second in 18..33 || second in 44..52) 1_300_000 else 0
+                    rx += 350_000 + burst + (second * 153_953 % 750_000)
+                    tx += 110_000 + (second * 37_001 % 450_000)
+                    meter.sample(rx, tx, second * 1000L)
+                    history.add(meter.downBytesPerSecond(), meter.upBytesPerSecond())
+                }
+                method("render").invoke(a)
+                (field("host").get(a) as View).removeCallbacks(field("homeTicker").get(a) as Runnable)
+            }
+            shot("home-speed-graph", "Home with one minute of sample download and upload rates")
+            onMain {
+                val history = field("speedHistory").get(a) as SpeedHistory
+                assertEquals("The captured graph must retain its samples", SpeedHistory.CAPACITY, history.size())
+            }
+        } finally {
+            onMain {
+                field("vpnState").setInt(a, originalState)
+                field("homeSeenUpAt").setLong(a, originalStart)
+                method("render").invoke(a)
+            }
+        }
     }
 
     // The service really connecting, connected and blocked, through a local server that accepts and never answers, and the core's
@@ -680,32 +724,6 @@ class UiTourDeviceTest {
             eventually("The service must be connected", 20_000) { FreeTunnelVpnService.state(context) == 2 }
             SystemClock.sleep(1_300)
             shot("home-connected", "Home connected: the logo at full opacity, the time under it"); done.add("home-connected")
-
-            // The local endpoint carries no user traffic. Feed a repeatable minute of counters
-            // through the speed meter so the graph's two lines can be reviewed in each theme.
-            onMain {
-                val meter = field("speedMeter").get(act()) as SpeedMeter
-                val history = field("speedHistory").get(act()) as SpeedHistory
-                history.clear()
-                meter.reset()
-                var rx = 0L
-                var tx = 0L
-                meter.sample(rx, tx, 0)
-                for (second in 1..SpeedHistory.CAPACITY) {
-                    val burst = if (second in 18..33 || second in 44..52) 1_300_000 else 0
-                    rx += 350_000 + burst + (second * 153_953 % 750_000)
-                    tx += 110_000 + (second * 37_001 % 450_000)
-                    meter.sample(rx, tx, second * 1000L)
-                    history.add(meter.downBytesPerSecond(), meter.upBytesPerSecond())
-                }
-                method("render").invoke(act())
-                (field("host").get(act()) as View).removeCallbacks(field("homeTicker").get(act()) as Runnable)
-            }
-            try {
-                shot("home-speed-graph", "Home with one minute of sample download and upload rates")
-            } finally {
-                onMain { method("scheduleHomeTick").invoke(act()) }
-            }
 
             // Disconnecting is the time between the user's Disconnect and the service saying it is off: too short to be caught, so the
             // flag Disconnect sets is set on the connected session, which is what the screen is in that time.
