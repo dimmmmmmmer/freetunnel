@@ -230,3 +230,17 @@
 "Updates in TestFlight" = "Updates in TestFlight";
 
 "Open TestFlight to update this app." = "Open TestFlight to update this app.";
+
+"Show QR code" = "Show QR code";
+
+"Scan with FreeTunnel on Android" = "Scan with FreeTunnel on Android";
+
+"The deep-link is too long for a QR code — export .toml instead" = "The deep-link is too long for a QR code — export .toml instead";
+
+"Deep-link copied — it contains the password, share it carefully" = "Deep-link copied — it contains the password, share it carefully";
+
+"Config exported — the file contains the password" = "Config exported — the file contains the password";
+
+"QR code" = "QR code";
+
+"Hidden while the screen is being shared" = "Hidden while the screen is being shared";

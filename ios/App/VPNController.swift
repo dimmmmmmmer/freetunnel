@@ -4,10 +4,14 @@ import FreeTunnelCore
 import NetworkExtension
 
 @MainActor final class VPNController: ObservableObject {
-    @Published private(set) var status: NEVPNStatus = .disconnected
+    @Published private(set) var status: NEVPNStatus = .disconnected {
+        // The graph shows one session's last minute: nothing of an earlier one.
+        didSet { if status != .connected { history.clear() } }
+    }
     @Published private(set) var logs = ""
     @Published private(set) var downSpeed = 0.0
     @Published private(set) var upSpeed = 0.0
+    @Published private(set) var history = SpeedHistory()
     private struct TrafficSample {
         let uploaded: UInt64
         let downloaded: UInt64
@@ -39,6 +43,15 @@ import NetworkExtension
                 previewConnectedAt = Date().addingTimeInterval(-125)
                 downSpeed = 2.4
                 upSpeed = 0.3
+                // A minute of plausible traffic, ending at the speeds the tiles show.
+                for second in 0..<SpeedHistory.capacity {
+                    let t = Double(second)
+                    let ramp = min(1, t / 8)
+                    let down = ramp * (1_400_000 + 900_000 * sin(t / 5) + 350_000 * sin(t * 1.7))
+                    let up = ramp * (240_000 + 110_000 * sin(t / 3 + 1))
+                    history.add(down: second == SpeedHistory.capacity - 1 ? 2_400_000 : down,
+                                up: second == SpeedHistory.capacity - 1 ? 300_000 : up)
+                }
             } else if scenario == "logs-filled" {
                 logs =
                     "12:00:00 INFO Configuration loaded\n"
@@ -163,15 +176,21 @@ import NetworkExtension
             lastStats = nil
             upSpeed = 0
             downSpeed = 0
+            history.clear()
             return
         }
         let now = ProcessInfo.processInfo.systemUptime
         if let lastStats, now > lastStats.time, stats.uploaded >= lastStats.uploaded,
             stats.downloaded >= lastStats.downloaded {
-            upSpeed =
-                Double(stats.uploaded - lastStats.uploaded) / (now - lastStats.time) / 1_000_000
-            downSpeed =
-                Double(stats.downloaded - lastStats.downloaded) / (now - lastStats.time) / 1_000_000
+            let upBytes = Double(stats.uploaded - lastStats.uploaded) / (now - lastStats.time)
+            let downBytes = Double(stats.downloaded - lastStats.downloaded) / (now - lastStats.time)
+            upSpeed = upBytes / 1_000_000
+            downSpeed = downBytes / 1_000_000
+            if status == .connected {
+                history.add(down: downBytes, up: upBytes)
+            } else {
+                history.clear()
+            }
         }
         lastStats = TrafficSample(uploaded: stats.uploaded, downloaded: stats.downloaded, time: now)
     }

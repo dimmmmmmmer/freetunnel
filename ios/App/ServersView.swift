@@ -47,6 +47,10 @@ struct ServersView: View {
                         && ProcessInfo.processInfo.environment["FT_PREVIEW_MENU"] == "export" {
                         try? await Task.sleep(for: .milliseconds(500))
                         exportProfile = state.selected?.id
+                    } else if state.isPreview
+                        && ProcessInfo.processInfo.environment["FT_PREVIEW_MENU"] == "qr" {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        if let id = state.selected?.id { state.dialog = .qr(id) }
                     }
                 #endif
             }
@@ -63,7 +67,10 @@ struct ServersView: View {
                 isPresented: $exporting, document: exportDocument, contentType: .plainText,
                 defaultFilename: exportName + ".toml"
             ) { result in
-                if case .failure(let error) = result { state.report(error) }
+                switch result {
+                case .success: state.message = "Config exported — the file contains the password"
+                case .failure(let error): state.report(error)
+                }
             }
             .sheet(isPresented: $scanning) {
                 QRScanner { text in
@@ -175,9 +182,17 @@ struct ServersView: View {
                         exporting = true
                     }
                     exportAction("Copy deep-link") {
-                        UIPasteboard.general.string = try DeepLinkEncoder.encode(
-                            Configuration(state.secret(profile).toml))
-                        state.message = "Link copied"
+                        state.copyToPasteboard(try state.deepLink(profile))
+                        state.message = "Deep-link copied — it contains the password, share it carefully"
+                    }
+                    exportAction("Show QR code", identifier: "export.qr") {
+                        // The code is made here too, to say so when the link is too long for one.
+                        if QRCode.make(try state.deepLink(profile)) == nil {
+                            state.message =
+                                "The deep-link is too long for a QR code — export .toml instead"
+                        } else {
+                            state.dialog = .qr(profile.id)
+                        }
                     }
                 }.padding(6).frame(width: 230).foregroundStyle(AppStyle.text)
                     .presentationCompactAdaptation(.popover)
@@ -200,8 +215,9 @@ struct ServersView: View {
             }.accessibilityLabel("Delete").accessibilityIdentifier("server-delete-" + profile.name)
         }.buttonStyle(.plain).foregroundStyle(AppStyle.secondary)
     }
-    private func exportAction(_ title: LocalizedStringKey, action: @escaping () throws -> Void)
-        -> some View {
+    private func exportAction(
+        _ title: LocalizedStringKey, identifier: String = "", action: @escaping () throws -> Void
+    ) -> some View {
         Button {
             exportProfile = nil
             do { try action() } catch { state.report(error) }
@@ -209,7 +225,7 @@ struct ServersView: View {
             Text(title).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).padding(
                 .horizontal, 9)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).accessibilityIdentifier(identifier)
     }
 }
 struct ConfigDocument: FileDocument {

@@ -8,7 +8,7 @@ xcrun simctl install "$device" "$root/ios/DerivedData/Build/Products/Debug-iphon
 mkdir -p "$root/ios/previews"
 for appearance in light dark; do
  xcrun simctl ui "$device" appearance "$appearance"
- for screen in connection connection-active servers servers-active routing routing-geo settings settings-bottom logs logs-filled import subscription new-server new-server-bottom edit-server edit-server-bottom add-list add-list-menu routing-mode geo-direction geo-interval settings-language settings-theme server-export; do
+ for screen in connection connection-active servers servers-active routing routing-geo settings settings-bottom logs logs-filled import subscription new-server new-server-bottom edit-server edit-server-bottom add-list add-list-menu routing-mode geo-direction geo-interval settings-language settings-theme server-export server-qr; do
   xcrun simctl terminate "$device" org.freetunnel.ios || true
   tab="$screen"
   geo=0
@@ -24,6 +24,7 @@ for appearance in light dark; do
     settings-language) tab=settings; menu=language ;;
     settings-theme) tab=settings; menu=theme ;;
     server-export) tab=servers; menu=export ;;
+    server-qr) tab=servers; menu=qr ;;
     connection-active) tab=connection; scenario=connected ;;
     servers-active) tab=servers; scenario=connected ;;
     logs-filled) tab=logs; scenario=logs-filled ;;
