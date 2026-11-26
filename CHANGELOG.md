@@ -7,6 +7,9 @@
 - When a client waits for a server greeting and FreeTunnel needs a hostname to select its route, the connection now times out after 10 seconds. An IP or application rule lets the greeting through immediately.
 - The application picker explains how to route shared system DNS in Through VPN mode.
 - If a connection fails or is cancelled while FreeTunnel is selecting its final route, both sides of the pending connection are cleaned up.
+- A configuration whose name contains `%1` or `%2` keeps its name when another one with the same name is imported.
+- On macOS and Linux, the passwordless helper update opens the files it is given with your own account's access, so it no longer shows whether a file you cannot read exists.
+- A configuration that sets tunnel options at its top level with dotted keys, such as `listener.tun.mtu_size`, still connects after FreeTunnel saves it: the options move under `[listener.tun]`.
 
 ## 1.3.2
 
