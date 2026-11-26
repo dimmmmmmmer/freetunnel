@@ -2,7 +2,9 @@ package org.freetunnel.android;
 
 import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -99,6 +101,27 @@ final class Certificates {
         }
         dropped |= !blank(text, last, text.length());
         return new Kept(der.toByteArray(), dropped ? pem.toString() : text, dropped);
+    }
+
+    /** Whether the text is only white space, as the desktop's QString::trimmed() sees it: a field with no certificate in it. */
+    static boolean blank(String text) {
+        return blank(text, 0, text.length());
+    }
+
+    /**
+     * The DER elements of whole certificates one after another (a Kept's der), each as its own bytes. It stops at the
+     * first thing that is not an element, as the desktop's derElementEnd walk does: nothing after it is a pin.
+     */
+    static List<byte[]> split(byte[] der) {
+        List<byte[]> out = new ArrayList<>();
+        int pos = 0;
+        while (pos < der.length) {
+            int[] item = element(der, pos, der.length, 0x30);
+            if (item == null) break;
+            out.add(Arrays.copyOfRange(der, pos, item[1]));
+            pos = item[1];
+        }
+        return out;
     }
 
     // Whether text[start, end) is only white space as the desktop's QString::trimmed()

@@ -688,6 +688,19 @@ public final class MainActivity extends Activity {
     private final List<Overlay> overlays = new ArrayList<>();
     private boolean pageBlocked;
 
+    // FLAG_SECURE is one flag on the window, and more than one card may want it (the editor shows the VPN password, the
+    // subscription form an address that holds credentials). Each holder acquires it as its card opens and releases it as that
+    // card closes, so closing the top card does not take the protection from the one under it. Main thread only, as the
+    // overlays are; per instance, and a recreated activity starts its window, and its count, from nothing.
+    private int secureWindowHolders;
+    private void secureWindowAcquire() {
+        if (secureWindowHolders++ == 0) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+    }
+    private void secureWindowRelease() {
+        if (secureWindowHolders == 0) return;
+        if (--secureWindowHolders == 0) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+    }
+
     private final class Overlay {
         final String name;
         final OverlayLayer.Kind kind;
@@ -1949,13 +1962,14 @@ public final class MainActivity extends Activity {
         add.setOnClickListener(v -> {
             String source = address.getText().toString().trim();
             try { SubscriptionData.address(source); } catch (Exception error) { toast(getString(R.string.subscription_failed)); return; }
-            closeOverlay(shown[0]); beginSubscription(source, null, null);
+            closeOverlay(shown[0]); beginSubscription(source, SubscriptionData.Trust.NONE, null, null);
         }); actions.addView(add, lp(-2, 34)); form.addView(actions, lp(-1, -2));
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        shown[0] = showOverlay("subscription", OverlayLayer.Kind.CARD, form, null,
-                () -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE));
+        // showOverlay returns the card that is up, and drops this onClose, when there is one: only a new card holds the flag.
+        boolean opening = overlay("subscription") == null;
+        if (opening) secureWindowAcquire();
+        shown[0] = showOverlay("subscription", OverlayLayer.Kind.CARD, form, null, opening ? this::secureWindowRelease : null);
     }
-    private void beginSubscription(String source, String origin, Answered done) {
+    private void beginSubscription(String source, SubscriptionData.Trust trust, String origin, Answered done) {
         if (subscriptionLoading) { toast(getString(R.string.subscription_updating)); answered(done, true); return; }
         final String server;
         try { server = SubscriptionData.address(source).getHost(); }
@@ -1964,18 +1978,26 @@ public final class MainActivity extends Activity {
             subscriptionLoading = true; toast(getString(R.string.subscription_updating));
             ioWorker.execute(() -> {
                 SubscriptionData.Document document = null;
-                try { document = SubscriptionData.apply(SubscriptionData.fetch(source), null); } catch (Exception ignored) { }
+                int failure = R.string.subscription_failed;
+                try { document = SubscriptionData.apply(SubscriptionData.fetch(SubscriptionData.requestFor(source, trust)), null); }
+                catch (SubscriptionData.FetchException e) { failure = subscriptionFailure(e); }
+                catch (Exception ignored) { }
                 final SubscriptionData.Document ready = document;
+                final int failed = failure;
                 runOnUiThread(() -> {
                     subscriptionLoading = false;
                     if (isDestroyed()) return;
-                    if (ready == null) { toast(getString(R.string.subscription_failed)); answered(done, true); return; }
+                    if (ready == null) { toast(getString(failed)); answered(done, true); return; }
                     validateAsync(ready.toml, SplitProfiles.DEFAULT, false, false,
                         checked -> showImportConfirmation(ready.name, false, checked, origin, true, done, source),
                         () -> answered(done, true));
                 });
             });
         }, null, () -> answered(done, false));
+    }
+    // What a fetch the config's certificate refused tells the user: the desktop's two answers to it, which the user can act on.
+    private static int subscriptionFailure(SubscriptionData.FetchException e) {
+        return e.failure == SubscriptionData.FetchException.Failure.BAD_PIN ? R.string.subscription_bad_pin : R.string.subscription_untrusted;
     }
     private void refreshSubscription(Config config, boolean manual) {
         if (subscriptionLoading || config.subscription == null || !configs.contains(config)) return;
@@ -1985,12 +2007,17 @@ public final class MainActivity extends Activity {
         if (manual) toast(getString(R.string.subscription_updating));
         ioWorker.execute(() -> {
             SubscriptionData.Document document = null;
-            try { document = SubscriptionData.apply(SubscriptionData.fetch(source), before); } catch (Exception ignored) { }
+            int failure = R.string.subscription_failed;
+            // Pinned to the config's own certificate when the subscription is the server's own, as the desktop's refresh is.
+            try { document = SubscriptionData.apply(SubscriptionData.fetch(SubscriptionData.requestFor(source, SubscriptionData.Trust.ofConfig(before))), before); }
+            catch (SubscriptionData.FetchException e) { failure = subscriptionFailure(e); }
+            catch (Exception ignored) { }
             final SubscriptionData.Document ready = document;
+            final int failed = failure;
             runOnUiThread(() -> {
                 subscriptionLoading = false;
                 if (isDestroyed() || !configs.contains(config) || !before.equals(config.toml) || !source.equals(config.subscription)) return;
-                if (ready == null) { if (manual) toast(getString(R.string.subscription_failed)); return; }
+                if (ready == null) { if (manual) toast(getString(failed)); return; }
                 if (!manual && topModalOverlay() != null) return;
                 String oldHost = ConfigForm.read(before).hostname, nextHost = ConfigForm.read(ready.toml).hostname;
                 Runnable apply = () -> validateAsync(ready.toml, config.profile, false, false, checked -> {
@@ -2121,8 +2148,8 @@ public final class MainActivity extends Activity {
 
     private void importText(String fallbackName, String text, String origin, Answered done) {
         try {
-            String source = SubscriptionData.source(text);
-            if (source != null) { beginSubscription(source, origin, done); return; }
+            SubscriptionData.Offer offer = SubscriptionData.offer(text);
+            if (offer != null) { beginSubscription(offer.url, offer.trust, origin, done); return; }
         } catch (Exception invalid) { toast(getString(R.string.text_invalid_trusttunnel_link)); answered(done, true); return; }
         if (DeepLinkImport.looksLikeLink(text)) importDeepLink(text, origin, done);
         else importToml(fallbackName, text, origin, done);
@@ -2649,11 +2676,13 @@ public final class MainActivity extends Activity {
         scroll.addView(form);
         card.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        // showOverlay returns the editor that is up, and drops this onClose, when there is one: only a new one holds the flag.
+        boolean opening = overlay("editor") == null;
+        if (opening) secureWindowAcquire();
         Overlay overlay = showOverlay("editor", OverlayLayer.Kind.CARD, card, null, () -> {
             validationRequest++;
             certificateTarget = null;
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            if (opening) secureWindowRelease();
         });
         shown[0] = overlay;
         overlay.width(dp(372));

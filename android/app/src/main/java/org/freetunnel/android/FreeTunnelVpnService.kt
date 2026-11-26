@@ -376,7 +376,18 @@ class FreeTunnelVpnService : VpnService() {
             candidate = null
         } finally {
             runCatching { descriptor?.close() }
-            candidate?.let { runCatching { it.stop() }; runCatching { it.close() } }
+            // candidate is still set only when start() returned false or something above threw: nothing
+            // may keep pointing at the dead core. generation had to be the token before start() (the core
+            // can call onStateChanged while it starts), so it moves on now, which also drops a callback
+            // already queued for this core. The collector stops first, so it is not handed a network
+            // change for a core being closed. client is cleared so that fail(), which the caller reaches
+            // next, does not stop and close this core a second time; it is stopped and closed here, once.
+            candidate?.let {
+                generation = token + 1
+                if (client === it) client = null
+                collector?.stopNotifying()
+                runCatching { it.stop() }; runCatching { it.close() }
+            }
         }
     }
 

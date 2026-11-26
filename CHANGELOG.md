@@ -10,6 +10,8 @@
 - A configuration whose name contains `%1` or `%2` keeps its name when another one with the same name is imported.
 - On macOS and Linux, the passwordless helper update opens the files it is given with your own account's access, so it no longer shows whether a file you cannot read exists.
 - A configuration that sets tunnel options with dotted keys, such as `listener.tun.mtu_size` at its top level or `tun.mtu_size` under `[listener]`, keeps them after FreeTunnel saves it: the options move under `[listener.tun]`.
+- Android updates a subscription from a server with its own certificate: it trusts the certificate the link or configuration pins and connects to the server's address, as the desktop app does.
+- On Android, a subscription address is held to the same rules as on desktop, and a relative redirect from an address without a path is followed correctly.
 
 ## 1.3.2
 
