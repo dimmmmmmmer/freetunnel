@@ -116,7 +116,15 @@ public struct Configuration {
         for list in routing.lists where list.enabled {
             guard let snapshot = snapshots[list.id], snapshot.source == list.source,
                 snapshot.kind == list.kind
-            else { throw ClientError.emptyList }
+            else {
+                // Not downloaded yet. A list that bypasses the VPN is left out, as on desktop: its
+                // traffic goes through the tunnel meanwhile, which leaks nothing, and a fresh install,
+                // whose default lists both bypass, can connect before (or in order to) fetch them.
+                // A list that sends traffic through the VPN still stops the connection: without it,
+                // that traffic would leave the tunnel.
+                if list.direction == .bypass { continue }
+                throw ClientError.emptyList
+            }
             rules += snapshot.entries.map { "@\(list.direction == .vpn ? 2 : 3):\($0)" }
         }
         guard rules.count <= 100_000 else { throw ClientError.tooLarge }

@@ -81,6 +81,18 @@ final class DesktopParityTests: XCTestCase {
             )
         }
     }
+    func testAListNotYetDownloadedOnlyStopsAConnectionWhenItSendsTrafficThroughTheVPN() throws {
+        let config = try Configuration(source)
+        var routing = Routing()
+        routing.lists = GeoList.freshInstallDefaults()
+        // A fresh install's lists both bypass the VPN: it connects before they are fetched.
+        let result = try Configuration(config.tunnel(routing: routing, snapshots: [:], killSwitch: true))
+        XCTAssertEqual(result.rawTable["exclusions"] as? [String], [])
+        routing.lists[0].direction = .vpn
+        XCTAssertThrowsError(try config.tunnel(routing: routing, snapshots: [:], killSwitch: true)) {
+            XCTAssertEqual($0 as? ClientError, .emptyList)
+        }
+    }
     func testImportedRulesBecomeEditableAndCanBeRemoved() throws {
         let config = try Configuration("exclusions = [\"example.org\", \"192.0.2.0/24\"]\n" + source)
         var routing = config.importedRouting
