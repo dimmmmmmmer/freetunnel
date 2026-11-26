@@ -33,6 +33,23 @@ import SwiftUI
 struct RootView: View {
     @State private var tab = ProcessInfo.processInfo.environment["FT_PREVIEW_TAB"] ?? "connection"
     @ObservedObject var state: AppState
+    @State private var homeGap: CGRect?
+    @State private var toastHeight: CGFloat = 0
+    // On Home, the toast sits in the middle of the gap between the config selector and the graph
+    // when it fits there; failing that, a one-line one sits over the graph, which it hides and
+    // which is no control; a longer one covers the tiles. Elsewhere, at the bottom. The result is
+    // its distance from the top of the screen area, nil for the bottom.
+    private func toastTop(in root: CGRect) -> CGFloat? {
+        guard tab == "connection", let gap = homeGap, toastHeight > 0 else { return nil }
+        let top = gap.minY - root.minY
+        if toastHeight + HomeMetrics.graphGap <= gap.height {
+            return top + (gap.height - toastHeight) / 2
+        }
+        if toastHeight <= HomeMetrics.graphHeight {
+            return top + gap.height + (HomeMetrics.graphHeight - toastHeight) / 2
+        }
+        return nil
+    }
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -78,15 +95,27 @@ struct RootView: View {
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppStyle.border)).padding(18)
             }
             if let message = state.message {
-                VStack {
-                    Spacer()
+                GeometryReader { root in
+                    let top = toastTop(in: root.frame(in: .global))
                     Text(LocalizedStringKey(message)).accessibilityIdentifier("notification").font(
                         AppStyle.label
                     ).padding(12)
                         .background(AppStyle.surface, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.border)).padding(
-                            .horizontal, 20
-                        ).padding(.bottom, 16)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppStyle.border))
+                        .background(
+                            GeometryReader { toast in
+                                Color.clear.preference(
+                                    key: ToastHeightKey.self, value: toast.size.height)
+                            }
+                        )
+                        // Unseen for the frame in which it is measured, rather than flashing at the bottom.
+                        .opacity(tab == "connection" && homeGap != nil && toastHeight == 0 ? 0 : 1)
+                        .padding(.horizontal, 20).padding(.bottom, top == nil ? 16 : 0)
+                        .frame(
+                            maxWidth: .infinity, maxHeight: .infinity,
+                            alignment: top == nil ? .bottom : .top
+                        )
+                        .padding(.top, top ?? 0)
                 }
                 .allowsHitTesting(false)
             }
@@ -94,6 +123,8 @@ struct RootView: View {
             .background(AppStyle.background).buttonStyle(AppButtonStyle()).toggleStyle(
                 AppToggleStyle()
             )
+            .onPreferenceChange(HomeGapKey.self) { homeGap = $0 }
+            .onPreferenceChange(ToastHeightKey.self) { toastHeight = $0 }
             .modifier(PreviewForms(state: state))
             .task(id: state.message) {
                 guard state.message != nil else { return }
@@ -201,9 +232,13 @@ struct HomeView: View {
                     )
                     .accessibilityLabel(vpn.isDisconnected ? Text("Connect") : Text("Disconnect"))
                     if vpn.status == .connected, let date = vpn.connectedAt {
-                        Text(date, style: .timer).font(.custom("Inter-Medium", size: 15))
-                            .foregroundStyle(
-                                AppStyle.secondary)
+                        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                            Text(
+                                SessionTime.format(
+                                    seconds: Int(timeline.date.timeIntervalSince(date)))
+                            ).font(.custom("Inter-Medium", size: 15))
+                                .monospacedDigit().foregroundStyle(AppStyle.secondary)
+                        }
                     } else if transitioning {
                         Text(vpn.status == .disconnecting ? "Disconnecting…" : "Connecting…")
                             .font(.custom("Inter-Medium", size: 15)).foregroundStyle(
@@ -230,16 +265,15 @@ struct HomeView: View {
                                         picker = false
                                     } label: {
                                         HStack {
-                                            Text(profile.name)
+                                            Text(profile.name).foregroundStyle(
+                                                state.selected?.id == profile.id
+                                                    ? AppStyle.accent : AppStyle.text)
                                             Spacer(minLength: 12)
-                                            if state.selected?.id == profile.id {
-                                                Image(systemName: "checkmark").font(
-                                                    .system(size: 10))
-                                            }
                                         }
                                         .padding(.horizontal, 12).frame(minHeight: 40)
                                         .contentShape(Rectangle())
-                                    }.buttonStyle(.plain)
+                                    }.buttonStyle(.plain).accessibilityAddTraits(
+                                        state.selected?.id == profile.id ? [.isSelected] : [])
                                 }
                             }.padding(6)
                         }.frame(
@@ -258,13 +292,25 @@ struct HomeView: View {
                     }
                 }.padding(.horizontal, 18)
             }.animation(.easeOut(duration: 0.28), value: vpn.status)
-            Spacer(minLength: 34)
+            // The gap between the selector and the graph, 22 at the least as on desktop.
+            Color.clear.frame(minHeight: 22).frame(maxHeight: .infinity)
+                .background(
+                    GeometryReader { gap in
+                        Color.clear.preference(key: HomeGapKey.self, value: gap.frame(in: .global))
+                    })
+            // The graph is laid over the space reserved above the tiles, as wide as both of them.
             (typeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(spacing: 12))
-                : AnyLayout(HStackLayout(spacing: 12))) {
+                ? AnyLayout(VStackLayout(spacing: HomeMetrics.tileSpacing))
+                : AnyLayout(HStackLayout(spacing: HomeMetrics.tileSpacing))) {
                     speedTile(upload: false, value: vpn.downSpeed)
                     speedTile(upload: true, value: vpn.upSpeed)
-                }.padding(.bottom, 44)
+                }
+                .overlay(alignment: .top) {
+                    SpeedGraph(history: vpn.history)
+                        .offset(y: -(HomeMetrics.graphHeight + HomeMetrics.graphGap))
+                }
+                .padding(.top, HomeMetrics.graphHeight + HomeMetrics.graphGap)
+                .padding(.bottom, 44)
         }.frame(maxWidth: .infinity).background(AppStyle.background)
             .onChange(of: transitioning) { _, value in pulse = value }
             .onAppear { pulse = transitioning }
@@ -282,7 +328,8 @@ struct HomeView: View {
             Text(String(format: "%.1f", value) + String(localized: " MB/s")).font(
                 .custom("Inter-Medium", size: 15))
         }.fixedSize().padding(.horizontal, 12).padding(.vertical, 8)
-            .frame(minWidth: 116, minHeight: 44).background(
-                AppStyle.tile, in: RoundedRectangle(cornerRadius: 8))
+            .frame(minWidth: HomeMetrics.tileMinWidth, minHeight: HomeMetrics.tileHeight)
+            .background(
+                AppStyle.tile, in: RoundedRectangle(cornerRadius: HomeMetrics.tileRadius))
     }
 }
