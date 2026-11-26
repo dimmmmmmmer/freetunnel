@@ -107,6 +107,7 @@ add_executable(FreeTunnel WIN32 MACOSX_BUNDLE
     src/app/AppGuiMain.cpp
     src/app/AppFont.cpp
     include/app/AppFont.h
+    include/app/SpeedHistory.h
     include/app/AppStartup.h
     src/app/PlatformAutoStart.cpp
     include/app/PlatformAutoStart.h

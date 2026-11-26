@@ -29,6 +29,9 @@ class MockBackend : public QObject {
     Q_PROPERTY(QString sessionTime READ sessionTime NOTIFY tick)
     Q_PROPERTY(QString downSpeed READ downSpeed NOTIFY tick)
     Q_PROPERTY(QString upSpeed READ upSpeed NOTIFY tick)
+    Q_PROPERTY(QVariantList downHistory READ downHistory NOTIFY tick)
+    Q_PROPERTY(QVariantList upHistory READ upHistory NOTIFY tick)
+    Q_PROPERTY(double historyScale READ historyScale NOTIFY tick)
     Q_PROPERTY(QString activeConfig READ activeConfig NOTIFY configChanged)
     Q_PROPERTY(QStringList configs READ configs NOTIFY configsChanged)
     Q_PROPERTY(int activeIndex READ activeIndex NOTIFY configChanged)
@@ -109,6 +112,20 @@ public:
     QString sessionTime() const { return m_sessionTime; }
     QString downSpeed() const { return m_downSpeed; }
     QString upSpeed() const { return m_upSpeed; }
+    QVariantList downHistory() const { return m_downHistory; }
+    QVariantList upHistory() const { return m_upHistory; }
+    double historyScale() const { return m_historyScale; }
+    // Sample data for the graph, bytes/s, oldest first; the scale as the real one: the highest, 64 KB/s at least.
+    void setHistory(const QVariantList &down, const QVariantList &up)
+    {
+        m_downHistory = down;
+        m_upHistory = up;
+        m_historyScale = 64000.0;
+        for (const QVariantList *l : {&down, &up})
+            for (const QVariant &v : *l)
+                m_historyScale = qMax(m_historyScale, v.toDouble());
+        emit tick();
+    }
     QString activeConfig() const { return m_activeConfig; }
     QStringList configs() const { return m_configs; }
     void setConfigs(const QStringList &names) { m_configs = names; emit configsChanged(); }
@@ -419,6 +436,8 @@ private:
     QString m_sessionTime = QStringLiteral("00:00:01");
     QString m_downSpeed = QStringLiteral("1.2");
     QString m_upSpeed = QStringLiteral("0.4");
+    QVariantList m_downHistory, m_upHistory;
+    double m_historyScale = 64000.0;
     QString m_activeConfig = QStringLiteral("Test Config");
     QStringList m_configs = {QStringLiteral("Test Config"), QStringLiteral("Backup")};
     int m_activeIndex = 0;

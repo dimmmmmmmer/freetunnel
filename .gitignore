@@ -49,7 +49,7 @@ ui_*.h
 
 # Local CI artifact downloads / Python cache
 ci-artifacts-latest/
-scripts/__pycache__/
+__pycache__/
 
 env/
 .env/

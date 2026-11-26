@@ -112,6 +112,7 @@ private slots:
     void aWrappedToastHasNoEmptySides();
     void aLongToastIsShownWholeAndForLonger();
     void aToastOnHomeKeepsOffTheSelectorAndTheTiles();
+    void homeShowsTheSpeedGraphOverTheTiles();
     void theConfigPickerIsAsWideAsItsNames();
     void theActiveConfigNameUsesTheRoomItHas();
     void theConnectedConfigKeepsRoomForItsName();
@@ -2413,6 +2414,46 @@ void TestQmlUi::aToastOnHomeKeepsOffTheSelectorAndTheTiles()
              qPrintable(describe()));
     // And opaque, or the tiles show through it.
     QTRY_COMPARE(toast->opacity(), 1.0);
+    delete root;
+}
+
+// The last minute of speeds sits over the tiles: as wide as both, as tall as one,
+// 8 px above them, and the logo block stays clear of it.
+void TestQmlUi::homeShowsTheSpeedGraphOverTheTiles()
+{
+    QVariantList down, up;
+    for (int i = 0; i < 60; ++i) {
+        down << 600000.0 + 500000.0 * std::sin(i / 6.0);
+        up << 150000.0 + 100000.0 * std::sin(i / 4.0 + 1.0);
+    }
+    m_backend.setHistory(down, up);
+    const auto clear = qScopeGuard([this] { m_backend.setHistory({}, {}); });
+    QObject *root = loadPage("pages/HomePage.qml");
+    QVERIFY(root);
+    QQuickWindow window;
+    QVERIFY(showInWindow(root, window, 400, 460));
+    auto *graph = namedIn(qobject_cast<QQuickItem *>(root), QStringLiteral("speedGraph"));
+    auto *tiles = namedIn(qobject_cast<QQuickItem *>(root), QStringLiteral("speedTiles"));
+    auto *logo = namedIn(qobject_cast<QQuickItem *>(root), QStringLiteral("connectionLogo"));
+    QVERIFY(graph && tiles && logo);
+    const QRectF g = sceneRect(graph), t = sceneRect(tiles);
+    QCOMPARE(g.width(), t.width());
+    QCOMPARE(g.width(), 116.0 + 12.0 + 116.0);
+    // The same height as a tile, not a second number.
+    QCOMPARE(g.height(), 44.0);
+    auto *tile = tiles->childItems().value(0);
+    QVERIFY(tile);
+    QCOMPARE(g.height(), tile->height());
+    QCOMPARE(g.bottom() + 8.0, t.top());
+    QCOMPARE(g.left(), t.left());
+    QVERIFY2(sceneRect(logo).bottom() <= g.top(), "the logo block overlaps the graph");
+
+    // Drawn, when it is asked for: a screenshot of Home with a minute of data.
+    const QString shots = qEnvironmentVariable("FT_HOME_GRAPH_SHOT");
+    if (!shots.isEmpty()) {
+        QTest::qWait(300);
+        QVERIFY(window.grabWindow().save(shots));
+    }
     delete root;
 }
 

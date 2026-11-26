@@ -848,6 +848,23 @@ class TvDeviceTest {
         }
     }
 
+    // Over the speed tiles, 8 above them, as wide as both and as high as one, the graph of the last minute's speeds: no control,
+    // nothing to read out.
+    @Test fun theSpeedGraphIsOverTheTilesAndAsWideAsThem() {
+        val a = open()
+        render(a, 0)
+        onMain {
+            val graph = root(a).findViewWithTag<View>("home:graph")
+            val foot = field("homeSpeedRow").get(a) as ViewGroup
+            val tiles = foot.getChildAt(foot.childCount - 1)
+            assertEquals("As wide as the two tiles", tiles.width.toFloat(), graph.width.toFloat(), dp(a, 1f))
+            assertEquals("As high as a tile", tiles.height, graph.height)
+            assertEquals("8 above them", dp(a, 8f), (topOf(tiles) - (topOf(graph) + graph.height)).toFloat(), dp(a, 1f))
+            assertFalse("No control", graph.isFocusable || graph.isClickable)
+            assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, graph.importantForAccessibility)
+        }
+    }
+
     // The toast on Home sits in the middle of the gap between the selector and the speed tiles.
     @Test fun aToastOnHomeSitsBetweenTheSelectorAndTheSpeedTiles() {
         val a = open()
@@ -977,7 +994,8 @@ class TvDeviceTest {
         eventually("The export menu opens") { overlayTag(a, "select") != null }
         val menu = overlayTag(a, "select")!!
         val texts = onMain { descendants(menu).filterIsInstance<TextView>().map { it.text.toString() }.toList() }
-        assertEquals("Two rows, and no check mark", listOf(context.getString(R.string.export_toml), context.getString(R.string.export_deep_link)), texts)
+        assertEquals("Three rows, and no check mark", listOf(context.getString(R.string.export_toml), context.getString(R.string.export_deep_link),
+            context.getString(R.string.export_qr)), texts)
         click(a, "select:1")
         eventually("The menu closes") { overlayTag(a, "select") == null }
         eventually("The notice says the link holds the password") { context.getString(R.string.deep_link_copied) in toastTexts(a) }
@@ -993,6 +1011,25 @@ class TvDeviceTest {
             assertTrue("Marked as sensitive, so a keyboard's history leaves it out",
                 onMain { clipboard.primaryClip?.description?.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true })
         }
+        val exportedLink = clip()
+        // Read the displayed symbol with the importer, then close the card with its back arrow.
+        click(a, "config:0:export")
+        eventually("The export menu opens for the QR code") { overlayTag(a, "select") != null }
+        click(a, "select:2")
+        eventually("The QR card opens") { overlayTag(a, "qr") != null }
+        val qrCard = overlayTag(a, "qr")!!
+        val decoded = onMain {
+            val image = descendants(qrCard).filterIsInstance<ImageView>().single { it.contentDescription == a.getString(R.string.export_qr) }
+            val bitmap = (image.drawable as android.graphics.drawable.BitmapDrawable).bitmap
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            val luma = java.nio.ByteBuffer.wrap(ByteArray(pixels.size) { pixels[it].toByte() })
+            QrDecoder.decode(luma, bitmap.width, bitmap.height, bitmap.width, 1)
+        }
+        assertNotNull(decoded)
+        assertEquals("QR and clipboard export the same configuration", exportedLink, decoded)
+        click(a, "qr:back")
+        eventually("The QR card closes") { overlayTag(a, "qr") == null }
         // The file: a phone's screen to save to is not driven from here; a TV without one says so.
         val picker = context.packageManager.resolveActivity(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
             .setType("application/octet-stream"), 0)

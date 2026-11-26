@@ -662,6 +662,14 @@ target_include_directories(test_logmodel PRIVATE ../include)
 target_link_libraries(test_logmodel PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME logmodel COMMAND test_logmodel -o ${CMAKE_CURRENT_BINARY_DIR}/report-logmodel.txt,txt)
 
+add_executable(test_speed_history
+    test_speed_history.cpp
+    ../include/app/SpeedHistory.h
+)
+target_include_directories(test_speed_history PRIVATE ../include)
+target_link_libraries(test_speed_history PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME speed_history COMMAND test_speed_history -o ${CMAKE_CURRENT_BINARY_DIR}/report-speed_history.txt,txt)
+
 add_executable(test_qml_ui
     test_qml_ui.cpp
     ui/MockBackend.cpp

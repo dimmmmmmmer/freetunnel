@@ -330,6 +330,11 @@ void Backend::onStatsTick()
     m_downRate = static_cast<double>(m_accDown);
     m_upRate = static_cast<double>(m_accUp);
     m_accUp = m_accDown = 0;
+    // The graph is empty while Off and starts afresh with each session.
+    if (m_connected)
+        m_speedHistory.add(m_downRate, m_upRate);
+    else
+        m_speedHistory.clear();
     emit tick();
 }
 
@@ -362,6 +367,18 @@ static QString fmtRate(double bytesPerSec) {
 }
 QString Backend::downSpeed() const { return fmtRate(m_downRate); }
 QString Backend::upSpeed() const { return fmtRate(m_upRate); }
+QVariantList Backend::downHistory() const {
+    QVariantList out;
+    for (int i = 0; i < m_speedHistory.size(); ++i)
+        out << m_speedHistory.down(i);
+    return out;
+}
+QVariantList Backend::upHistory() const {
+    QVariantList out;
+    for (int i = 0; i < m_speedHistory.size(); ++i)
+        out << m_speedHistory.up(i);
+    return out;
+}
 
 QString Backend::activeConfig() const {
     return m_activePath.isEmpty() ? tr("No config") : nameForPath(m_activePath);

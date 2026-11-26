@@ -23,6 +23,7 @@
 class QHostAddress;
 
 #include "app/LogModel.h"
+#include "app/SpeedHistory.h"
 #include "core/AppSettings.h"
 #include "core/CredentialStore.h"
 #include "vpn/vpn_helper_client.h"
@@ -49,6 +50,11 @@ class Backend : public QObject {
     Q_PROPERTY(QString sessionTime READ sessionTime NOTIFY tick)
     Q_PROPERTY(QString downSpeed READ downSpeed NOTIFY tick)
     Q_PROPERTY(QString upSpeed READ upSpeed NOTIFY tick)
+    // The last minute of both speeds in bytes/s, oldest first, and what the top of
+    // Home's graph stands for. Empty while there is no session.
+    Q_PROPERTY(QVariantList downHistory READ downHistory NOTIFY tick)
+    Q_PROPERTY(QVariantList upHistory READ upHistory NOTIFY tick)
+    Q_PROPERTY(double historyScale READ historyScale NOTIFY tick)
     Q_PROPERTY(QString activeConfig READ activeConfig NOTIFY configChanged)
     Q_PROPERTY(QStringList configs READ configs NOTIFY configsChanged)
     Q_PROPERTY(int activeIndex READ activeIndex NOTIFY configChanged)
@@ -135,6 +141,9 @@ public:
     QString sessionTime() const;
     QString downSpeed() const;
     QString upSpeed() const;
+    QVariantList downHistory() const;
+    QVariantList upHistory() const;
+    double historyScale() const { return m_speedHistory.scale(); }
     QString activeConfig() const;
     const QStringList &configs() const { return m_names; }
     int activeIndex() const { return m_paths.indexOf(m_activePath); }
@@ -567,6 +576,7 @@ private:
     QTimer m_autoConnectTimer; // "Connect on startup", until it fires or a disconnect stops it
     quint64 m_accUp = 0, m_accDown = 0; // bytes accumulated since last tick
     double m_upRate = 0, m_downRate = 0; // bytes/sec
+    SpeedHistory m_speedHistory;         // the last minute of them, while connected
 
     QString m_lastErrorMsg;       // last error shown as a toast (for de-duping)
     qint64 m_lastErrorAt = 0;     // ms epoch of that toast
