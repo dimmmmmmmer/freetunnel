@@ -221,6 +221,37 @@ QString buildConfigToml(const ConfigToml &c, const QString &logLevel) {
     return t;
 }
 
+// The tun settings a file set from the root with dotted keys, as
+// `listener.tun.mtu_size = 1400` or `listener . "tun" . excluded_routes = [...]`,
+// each written as the key of [listener.tun] it means, with a value that runs over
+// several lines kept whole. They are not carried over at the root, where the
+// [listener.tun] the rebuild writes would define the table a second time; moved,
+// the file keeps the routing it asked for. An inline `listener.tun = { ... }` or
+// `listener = { tun = { ... } }` is not moved: it is dropped, and the defaults
+// are written, as for a file that said nothing.
+static QString dottedTunLines(const QString &rootBody) {
+    QString out;
+    OpenValue open;
+    bool moving = false;
+    const QStringList lines = rootBody.split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        if (open.open()) {
+            if (moving)
+                out += line + QLatin1Char('\n');
+            advanceOpenValue(open, line);
+            continue;
+        }
+        QList<int> starts;
+        const QStringList parts = keyPartsOf(line, &starts);
+        moving = parts.size() >= 3 && parts.at(0) == QLatin1String("listener")
+                && parts.at(1) == QLatin1String("tun");
+        if (moving)
+            out += line.mid(starts.at(2)) + QLatin1Char('\n');
+        advanceOpenValue(open, line);
+    }
+    return out;
+}
+
 // Carry over everything ConfigToml has no field for, so buildConfigToml() can put
 // it back. Without this the round trip is lossy in a way nobody sees: the file
 // still parses, still connects, and quietly routes differently.
@@ -230,6 +261,10 @@ static void carryOverUnknownTables(const QList<QPair<QString, QString>> &tables,
         const QString &body = table.second;
         if (header.isEmpty()) {
             c.extraRootKeys = unknownKeyLines(body, knownRootKeys());
+            // The root is the first table, so a [listener.tun] header of the
+            // file, which comes after it, replaces this below: a file that has
+            // both is one the core refuses, and the header is the one to keep.
+            c.tunSection = normalizeBody(dottedTunLines(body));
         } else if (header == QLatin1String("endpoint")) {
             c.extraEndpointKeys = unknownKeyLines(body, knownEndpointKeys());
         } else if (header == QLatin1String("listener.tun")) {
