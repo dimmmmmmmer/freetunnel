@@ -5,6 +5,9 @@
 #include "certificate_vectors.h"
 #include "core/ConfigToml.h"
 #include "endpoint_export_vectors.h"
+// Not on the include path of the tests, as ConfigToml.h is; the file is built into
+// this one all the same.
+#include "../src/core/ConfigTomlSyntax.h"
 
 using namespace freetunnel;
 
@@ -41,6 +44,14 @@ private slots:
     void multiLineValuesTheEditorDoesNotOwnSurviveARoundTrip();
     void literalStringsAndMultiLineArraysAreRead();
     void aCertificateIsReadInEverySpelling();
+
+    // A table of ours spelled as dotted keys or inline at the root.
+    void keyPartsOfSplitsADottedKey();
+    void aRootDottedKeyForAWrittenTableIsNotKept();
+    void aRootDottedTunKeyMovesUnderTheTunTable();
+    void aTunHeaderWinsOverRootDottedTunKeys();
+    void aListenerTableDottedTunKeyMovesUnderTheTunTable();
+    void aTunHeaderWinsOverListenerDottedTunKeysWhereverItIs();
 
     // TrustTunnel 1.3 configs.
     void theSubscriptionTableIsLeftOut();
@@ -1678,6 +1689,175 @@ void TestConfigToml::randomTextIsNeverAnExportWithAServer()
         const auto exported = parseEndpointExport(toml);
         if (exported)
             QVERIFY2(parseConfigToml(toml).addresses.isEmpty(), qPrintable(toml));
+    }
+}
+
+// The parts of the key a line sets, as a dotted key is read: a dot or an = inside
+// quotes is part of a name, and one outside it ends one.
+void TestConfigToml::keyPartsOfSplitsADottedKey()
+{
+    using freetunnel::toml_syntax::keyPartsOf;
+    QList<int> starts;
+
+    QCOMPARE(keyPartsOf(QStringLiteral("\"a.b\" = 1"), &starts), QStringList{QStringLiteral("a.b")});
+    QCOMPARE(starts, (QList<int>{0}));
+    QCOMPARE(keyPartsOf(QStringLiteral("\"endpoint\".hostname = 1"), &starts),
+             (QStringList{QStringLiteral("endpoint"), QStringLiteral("hostname")}));
+    QCOMPARE(starts, (QList<int>{0, 11}));
+    QCOMPARE(keyPartsOf(QStringLiteral("\"a=b\".c = 1"), &starts),
+             (QStringList{QStringLiteral("a=b"), QStringLiteral("c")}));
+    QCOMPARE(starts, (QList<int>{0, 6}));
+    QCOMPARE(keyPartsOf(QStringLiteral("listener . \"tun\" . x = 1"), &starts),
+             (QStringList{QStringLiteral("listener"), QStringLiteral("tun"), QStringLiteral("x")}));
+    QCOMPARE(starts, (QList<int>{0, 11, 19}));
+    QCOMPARE(keyPartsOf(QStringLiteral("  'a.b'.c=1"), &starts),
+             (QStringList{QStringLiteral("a.b"), QStringLiteral("c")}));
+    QCOMPARE(starts, (QList<int>{2, 8}));
+    // Only what is before the first = outside quotes is the key.
+    QCOMPARE(keyPartsOf(QStringLiteral("hostname = \"x.y\""), nullptr), QStringList{QStringLiteral("hostname")});
+
+    // No key: a comment, a header, no =, an empty or an unterminated part.
+    for (const char *line : {"# a.b = 1", "[endpoint]", "", "   ", "justakey", ".a = 1", "a. = 1", "= 1",
+                             "\"unterminated = 1", "\"a\"b = 1", "a.b # = 1"})
+        QVERIFY2(keyPartsOf(QString::fromLatin1(line), &starts).isEmpty(), line);
+}
+
+// A table the rewrite writes itself cannot be spelled at the root as well: dotted
+// or inline, it is defined there, and a header may not reopen it. Kept as an
+// unknown key, it made the rebuilt file one the core refuses, and the config
+// could never connect. Inside [endpoint] the same goes for a dotted child of a key
+// the rewrite writes. A key that only looks like one, one name with a dot in it
+// or a first part that is nothing of ours, stays.
+void TestConfigToml::aRootDottedKeyForAWrittenTableIsNotKept()
+{
+    const QString src = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "endpoint.provider_tag = \"gold\"\n"
+            "\"endpoint\".hostname = \"elsewhere\"\n"
+            "endpoint = { hostname = \"x\" }\n"
+            "listener.socks.address = \"127.0.0.1:1080\"\n"
+            "listener = { tun = { mtu_size = 1 } }\n"
+            "loglevel.extra = 1\n"
+            "\"endpoint.hostname\" = \"kept\"\n"
+            "provider.quirk = 42\n"
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n"
+            "certificate.extra = 1\n"
+            "provider.tag = 2\n");
+
+    const ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.hostname, QStringLiteral("vpn.example.com"));
+    QCOMPARE(c.extraRootKeys, QStringLiteral("\"endpoint.hostname\" = \"kept\"\nprovider.quirk = 42\n"));
+    QCOMPARE(c.extraEndpointKeys, QStringLiteral("provider.tag = 2\n"));
+    QVERIFY2(c.tunSection.isEmpty(), qPrintable(c.tunSection));
+
+    const QString rebuilt = buildConfigToml(c);
+    QCOMPARE(rebuilt.count(QStringLiteral("[endpoint]")), 1);
+    for (const char *gone : {"elsewhere", "endpoint = {", "listener = {", "127.0.0.1:1080", "certificate.extra"})
+        QVERIFY2(!rebuilt.contains(QLatin1String(gone)), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("\n\"endpoint.hostname\" = \"kept\"\n")), qPrintable(rebuilt));
+    QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
+}
+
+// What a root dotted key says about [listener.tun] is not thrown away with the
+// rest: it is the routing the file asked for, and is written under the table's
+// header, where it means the same.
+void TestConfigToml::aRootDottedTunKeyMovesUnderTheTunTable()
+{
+    const QString src = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "listener.tun.mtu_size = 1400\n"
+            "listener . \"tun\" . excluded_routes = [\n"
+            "  \"10.9.0.0/16\",\n"
+            "]\n"
+            "listener.socks.address = \"127.0.0.1:1080\"\n"
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n");
+
+    const ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.tunSection,
+             QStringLiteral("mtu_size = 1400\nexcluded_routes = [\n  \"10.9.0.0/16\",\n]\n"));
+    QVERIFY2(c.extraRootKeys.isEmpty(), qPrintable(c.extraRootKeys));
+
+    const QString rebuilt = buildConfigToml(c);
+    QCOMPARE(rebuilt.count(QStringLiteral("[listener.tun]")), 1);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("listener.tun.")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("listener . ")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("127.0.0.1:1080")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("\n[listener.tun]\nmtu_size = 1400\nexcluded_routes = [\n")),
+             qPrintable(rebuilt));
+    // The file's routing, not our defaults over it.
+    QVERIFY2(!rebuilt.contains(QStringLiteral("192.168.0.0/16")), qPrintable(rebuilt));
+    QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
+}
+
+// A file with both is one the core refuses; the table is the one kept, as it
+// always was, and the root's keys for it are not mixed into it.
+void TestConfigToml::aTunHeaderWinsOverRootDottedTunKeys()
+{
+    const QString src = QStringLiteral(
+            "listener.tun.mtu_size = 1400\n"
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "\n[listener.tun]\n"
+            "mtu_size = 1280\n");
+
+    const ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.tunSection, QStringLiteral("mtu_size = 1280\n"));
+    const QString rebuilt = buildConfigToml(c);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("1400")), qPrintable(rebuilt));
+    QCOMPARE(rebuilt.count(QStringLiteral("[listener.tun]")), 1);
+}
+
+// The same keys under [listener], as `tun.mtu_size = 1400`: [listener.tun]'s, as
+// the root's dotted ones are, and moved under its header in the same way.
+void TestConfigToml::aListenerTableDottedTunKeyMovesUnderTheTunTable()
+{
+    const QString src = QStringLiteral(
+            "loglevel = \"info\"\n"
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n"
+            "username = \"u\"\n"
+            "\n[listener]\n"
+            "tun.mtu_size = 1400\n"
+            "\"tun\" . excluded_routes = [\n"
+            "  \"10.9.0.0/16\",\n"
+            "]\n"
+            "socks.address = \"127.0.0.1:1080\"\n");
+
+    const ConfigToml c = parseConfigToml(src);
+    QCOMPARE(c.tunSection,
+             QStringLiteral("mtu_size = 1400\nexcluded_routes = [\n  \"10.9.0.0/16\",\n]\n"));
+    const QString rebuilt = buildConfigToml(c);
+    QCOMPARE(rebuilt.count(QStringLiteral("[listener.tun]")), 1);
+    QVERIFY2(!rebuilt.contains(QStringLiteral("[listener]")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("tun.")), qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("127.0.0.1:1080")), qPrintable(rebuilt));
+    QVERIFY2(rebuilt.contains(QStringLiteral("\n[listener.tun]\nmtu_size = 1400\nexcluded_routes = [\n")),
+             qPrintable(rebuilt));
+    QVERIFY2(!rebuilt.contains(QStringLiteral("192.168.0.0/16")), qPrintable(rebuilt));
+    QCOMPARE(buildConfigToml(parseConfigToml(rebuilt)), rebuilt);
+}
+
+// A [listener.tun] header before [listener] is kept as well as one after it.
+void TestConfigToml::aTunHeaderWinsOverListenerDottedTunKeysWhereverItIs()
+{
+    const QString head = QStringLiteral(
+            "\n[endpoint]\n"
+            "hostname = \"vpn.example.com\"\n"
+            "addresses = [\"1.2.3.4:443\"]\n");
+    const QString table = QStringLiteral("\n[listener.tun]\nmtu_size = 1280\n");
+    const QString dotted = QStringLiteral("\n[listener]\ntun.mtu_size = 1400\n");
+    for (const QString &src : {head + table + dotted, head + dotted + table}) {
+        const ConfigToml c = parseConfigToml(src);
+        QCOMPARE(c.tunSection, QStringLiteral("mtu_size = 1280\n"));
+        QVERIFY2(!buildConfigToml(c).contains(QStringLiteral("1400")), qPrintable(buildConfigToml(c)));
     }
 }
 

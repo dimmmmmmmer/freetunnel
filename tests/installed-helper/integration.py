@@ -2,6 +2,7 @@
 """Exercise the actual privileged installer only in a disposable Docker rootfs."""
 import hashlib
 import fcntl
+import grp
 import os
 from pathlib import Path
 import shutil
@@ -71,6 +72,15 @@ with tempfile.TemporaryDirectory() as temporary:
     corrupted = work / "bad.sig"
     corrupted.write_bytes(b"x" * 64)
     run(fixture, "--install-helper", initial[0], initial[1], corrupted, *initial[3:], success=False)
+    # The installer opens the named files as the given user, not as root: a
+    # root-only file must be refused without touching the signature check. It
+    # sits where the user can reach it, so that it is the file's own permissions
+    # that refuse it and not /root on the way.
+    probe = work / "rootonly.sig"
+    probe.write_bytes(b"p" * 64)
+    probe.chmod(0o600)
+    denied = run(fixture, "--install-helper", initial[0], initial[1], probe, *initial[3:], success=False)
+    assert "signature" not in denied.stderr, denied.stderr
     assert not installed.exists()
     run(fixture, "--install-helper", *initial,
         env={**os.environ, "TAR_OPTIONS": "--not-a-real-option", "QT_PLUGIN_PATH": str(work)})
@@ -140,8 +150,48 @@ with tempfile.TemporaryDirectory() as temporary:
     as_user("helper-a", "update", *bad_tree, success=False)
     escape.unlink()
     assert digest(installed) == initial[3]
+    # Root must not open what the invoking user cannot, nor reveal whether it
+    # exists: a present root-only file and a missing one fail identically, and
+    # neither gets as far as the signature check. The control proves that a
+    # file the user can read does reach it.
+    missing = work / "missing.sig"
+    assert not missing.exists()
+    unreadable = [as_user("helper-a", "update", *update[:2], path, *update[3:], success=False)
+                  for path in (probe, missing)]
+    assert (unreadable[0].returncode, unreadable[0].stderr) == (unreadable[1].returncode, unreadable[1].stderr)
+    assert "signature" not in unreadable[0].stderr, unreadable[0].stderr
+    control = as_user("helper-a", "update", *update[:2], corrupted, *update[3:], success=False)
+    assert "signature" in control.stderr, control.stderr
+    # Another user's private file is as closed to root here as it is to helper-a.
+    foreign = work / "foreign.sig"
+    foreign.write_bytes(update[2].read_bytes())
+    foreign.chmod(0o600)
+    os.chown(foreign, 1002, 1002)
+    result = as_user("helper-a", "update", *update[:2], foreign, *update[3:], success=False)
+    assert "signature" not in result.stderr, result.stderr
+    # Root's own groups must be dropped too: with only seteuid(1001) this
+    # root:root 0640 copy would still be readable through gid 0.
+    rootgroup = work / "rootgroup.sig"
+    rootgroup.write_bytes(update[2].read_bytes())
+    os.chown(rootgroup, 0, 0)
+    rootgroup.chmod(0o640)
+    result = as_user("helper-a", "update", *update[:2], rootgroup, *update[3:], success=False)
+    assert "signature" not in result.stderr, result.stderr
+    assert digest(installed) == initial[3]
     as_user("helper-a", "update", *update)
     assert digest(installed) == update[3]
+
+    # Supplementary groups count: a signature readable only through a group
+    # helper-a has been added to must be accepted.
+    # Required, not skipped: without them this case would pass by not running.
+    assert shutil.which("groupadd") and shutil.which("usermod"), "groupadd and usermod are required"
+    run("groupadd", "ft-share")
+    run("usermod", "-aG", "ft-share", "helper-a")
+    shared = package("1.2.7", "shared", b"\nshared group runtime\n")
+    os.chown(shared[2], 0, grp.getgrnam("ft-share").gr_gid)
+    shared[2].chmod(0o640)
+    as_user("helper-a", "update", *shared)
+    assert digest(installed) == shared[3]
     as_user("helper-a", *start)
     run(installed, "--authorize-helper", "1002")
     as_user("helper-b", "check")

@@ -96,7 +96,7 @@ QString describeUplink(uint32_t ifIndex)
     const QString name =
             QNetworkInterface::interfaceFromIndex(static_cast<int>(ifIndex)).humanReadableName();
     return name.isEmpty() ? QStringLiteral("interface %1").arg(ifIndex)
-                          : QStringLiteral("%1 (interface %2)").arg(name).arg(ifIndex);
+                          : QStringLiteral("%1 (interface %2)").arg(name, QString::number(ifIndex));
 }
 
 // How the core's set_system_dns() fails on Windows when it finds no adapter to
