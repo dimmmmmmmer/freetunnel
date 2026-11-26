@@ -13,7 +13,8 @@
 #include <QTemporaryDir>
 #include <QTextStream>
 
-#include <cstdlib>
+#include <cerrno>
+#include <cstring>
 #include <vector>
 
 #include <fcntl.h>
@@ -24,7 +25,10 @@
 #include <signal.h>
 #endif
 #include <sys/file.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace freetunnel::installed_helper {
@@ -48,59 +52,135 @@ bool protectedDirectory(const QString &path, bool create)
     return S_ISDIR(st.st_mode) && st.st_uid == 0 && (st.st_mode & 0022) == 0;
 }
 
-// Root's identity is put back when this goes; anything short of that aborts.
-class CallerAccess {
-public:
-    explicit CallerAccess(quint32 uid) : m_rootGid(::getegid()) {
-        // Group calls need euid 0, so save root's own groups before changing.
-        const int count = ::getgroups(0, nullptr);
-        if (count < 0) return;
-        m_rootGroups.resize(static_cast<size_t>(count));
-        const int got = ::getgroups(count, m_rootGroups.data());
-        if (got < 0) return;
-        m_rootGroups.resize(static_cast<size_t>(got));
-        if (m_rootGroups.empty()) m_rootGroups.push_back(m_rootGid);
-        const passwd *pw = ::getpwuid(uid);
-        if (!pw || pw->pw_uid != uid) return;
-        // initgroups reuses NSS static buffers, so keep our own copies.
-        const QByteArray name(pw->pw_name);
-        const gid_t gid = pw->pw_gid;
-        m_changed = true;
-#ifdef Q_OS_MACOS
-        if (::initgroups(name.constData(), static_cast<int>(gid)) != 0) return;
-#else
-        if (::initgroups(name.constData(), gid) != 0) return;
-#endif
-        if (::setegid(gid) != 0 || ::seteuid(uid) != 0) return;
-        m_dropped = ::geteuid() == uid && ::getegid() == gid;
-    }
-    ~CallerAccess() {
-        if (!m_changed) return;
-        // The saved set-user-ID is 0, so seteuid(0) always works back. The user and
-        // group IDs are what must come back, or nothing more may run as root.
-        const bool back = ::seteuid(0) == 0 && ::setegid(m_rootGid) == 0;
-        if (!back || ::geteuid() != 0 || ::getegid() != m_rootGid) std::abort();
-        // Root's own supplementary groups are put back where the system lets us.
-        // Only where: macOS can report more groups than setgroups() accepts
-        // (NGROUPS_MAX, 16), and aborting there would fail every installation. With
-        // an effective user ID of 0 the list decides no access, so the caller's
-        // groups left in it grant nothing.
-#ifdef Q_OS_MACOS
-        const int restored = ::setgroups(static_cast<int>(m_rootGroups.size()), m_rootGroups.data());
-#else
-        const int restored = ::setgroups(m_rootGroups.size(), m_rootGroups.data());
-#endif
-        Q_UNUSED(restored)
-    }
-    CallerAccess(const CallerAccess &) = delete;
-    CallerAccess &operator=(const CallerAccess &) = delete;
-    bool ok() const { return m_dropped; }
-private:
-    gid_t m_rootGid = 0;
-    std::vector<gid_t> m_rootGroups;
-    bool m_changed = false; // set before the first credential change
-    bool m_dropped = false;
+// Who the caller is, read before any fork: a child forked from this process,
+// which may have threads, makes only async-signal-safe calls.
+struct Caller {
+    uid_t uid = 0;
+    gid_t gid = 0;
+    std::vector<gid_t> groups;
 };
+
+bool callerOf(quint32 uid, Caller *caller)
+{
+    const passwd *pw = ::getpwuid(uid);
+    if (!pw || pw->pw_uid != uid) return false;
+    // getgrouplist reuses the same static buffers as getpwuid: copy first.
+    const QByteArray name(pw->pw_name);
+    caller->uid = pw->pw_uid;
+    caller->gid = pw->pw_gid;
+    for (int room = 64; room <= 65536; room *= 4) {
+        int count = room;
+        caller->groups.assign(static_cast<size_t>(room), 0);
+#ifdef Q_OS_MACOS
+        const int got = ::getgrouplist(name.constData(), static_cast<int>(caller->gid),
+                                       reinterpret_cast<int *>(caller->groups.data()), &count);
+#else
+        const int got = ::getgrouplist(name.constData(), caller->gid, caller->groups.data(), &count);
+#endif
+        if (got >= 0 && count >= 0 && count <= room) {
+            caller->groups.resize(static_cast<size_t>(count));
+            break;
+        }
+        caller->groups.clear();
+    }
+    if (caller->groups.empty()) caller->groups.push_back(caller->gid);
+    // setgroups() takes at most NGROUPS_MAX, which is 16 on macOS. The primary
+    // group comes first; a file readable only through a group past that is
+    // refused, never opened with more access than the caller has.
+    const long most = ::sysconf(_SC_NGROUPS_MAX);
+    if (most > 0 && caller->groups.size() > static_cast<size_t>(most))
+        caller->groups.resize(static_cast<size_t>(most));
+    return true;
+}
+
+// One descriptor, or none, and a byte that says which.
+bool sendDescriptor(int socket, int fd)
+{
+    char sent = fd >= 0 ? 1 : 0;
+    iovec part{&sent, 1};
+    msghdr message{};
+    message.msg_iov = &part;
+    message.msg_iovlen = 1;
+    alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))] = {};
+    if (fd >= 0) {
+        message.msg_control = control;
+        message.msg_controllen = sizeof(control);
+        cmsghdr *header = CMSG_FIRSTHDR(&message);
+        header->cmsg_level = SOL_SOCKET;
+        header->cmsg_type = SCM_RIGHTS;
+        header->cmsg_len = CMSG_LEN(sizeof(int));
+        std::memcpy(CMSG_DATA(header), &fd, sizeof(int));
+    }
+    ssize_t written;
+    do written = ::sendmsg(socket, &message, 0); while (written < 0 && errno == EINTR);
+    return written == 1;
+}
+
+int receiveDescriptor(int socket)
+{
+    char sent = 0;
+    iovec part{&sent, 1};
+    msghdr message{};
+    message.msg_iov = &part;
+    message.msg_iovlen = 1;
+    alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))] = {};
+    message.msg_control = control;
+    message.msg_controllen = sizeof(control);
+    ssize_t got;
+    do got = ::recvmsg(socket, &message, 0); while (got < 0 && errno == EINTR);
+    int fd = -1;
+    if (got == 1 && !(message.msg_flags & MSG_CTRUNC)) {
+        for (cmsghdr *header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
+            if (header->cmsg_level == SOL_SOCKET && header->cmsg_type == SCM_RIGHTS
+                && header->cmsg_len == CMSG_LEN(sizeof(int)))
+                std::memcpy(&fd, CMSG_DATA(header), sizeof(int));
+        }
+    }
+    if (fd >= 0 && (sent != 1 || ::fcntl(fd, F_SETFD, FD_CLOEXEC) != 0)) {
+        ::close(fd);
+        fd = -1;
+    }
+    return fd;
+}
+
+// The path opened as the caller alone: by a child that has given up root for
+// good (groups, then group, then user, and root checked to be out of reach) and
+// hands the descriptor back. This process's own credentials never change. It
+// once lowered and raised its effective IDs around the open instead, and on
+// macOS that left it with the caller's group membership for the rest of the
+// installation, which then failed.
+int openAsCaller(const QByteArray &path, const Caller &caller)
+{
+    int pair[2];
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return -1;
+    const pid_t child = ::fork();
+    if (child < 0) {
+        ::close(pair[0]);
+        ::close(pair[1]);
+        return -1;
+    }
+    if (child == 0) {
+        ::close(pair[0]);
+        int fd = -1;
+#ifdef Q_OS_MACOS
+        const int groups = ::setgroups(static_cast<int>(caller.groups.size()), caller.groups.data());
+#else
+        const int groups = ::setgroups(caller.groups.size(), caller.groups.data());
+#endif
+        if (groups == 0 && ::setgid(caller.gid) == 0 && ::setuid(caller.uid) == 0 && ::setuid(0) != 0
+            && ::getuid() == caller.uid && ::geteuid() == caller.uid && ::getgid() == caller.gid
+            && ::getegid() == caller.gid)
+            fd = ::open(path.constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+        sendDescriptor(pair[1], fd);
+        ::_exit(0);
+    }
+    ::close(pair[1]);
+    const int fd = receiveDescriptor(pair[0]);
+    ::close(pair[0]);
+    int status = 0;
+    while (::waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    return fd;
+}
 
 // Copy from a descriptor once, then verify/extract only the private snapshot.
 // An unprivileged caller may replace or modify its file throughout this call;
@@ -108,15 +188,10 @@ private:
 // The caller names the path, so it is opened with the caller's own access (uid,
 // primary and supplementary groups): root never opens a file, FIFO or device the
 // caller could not, and the later outcome cannot reveal one to it. Everything
-// after the open runs as root again, on the descriptor alone.
-bool snapshot(const QString &source, const QString &target, qint64 limit, quint32 caller)
+// after the open runs as root, on the descriptor alone.
+bool snapshot(const QString &source, const QString &target, qint64 limit, const Caller &caller)
 {
-    const QByteArray path = QFile::encodeName(source);
-    int fd = -1;
-    {
-        const CallerAccess as(caller);
-        if (as.ok()) fd = ::open(path.constData(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
-    }
+    const int fd = openAsCaller(QFile::encodeName(source), caller);
     if (fd < 0) return false;
     struct stat st{};
     QFile input;
@@ -284,8 +359,9 @@ bool installSnapshot(const QStringList &args, bool update, quint32 uid, const QT
     const QString archive = stage.path() + QStringLiteral("/archive.tar.gz");
     const QString sumsPath = stage.path() + QStringLiteral("/sums");
     const QString sigPath = stage.path() + QStringLiteral("/signature");
-    if (!snapshot(args[0], archive, kArchiveLimit, uid) || !snapshot(args[1], sumsPath, 65536, uid)
-        || !snapshot(args[2], sigPath, 64, uid)) return false;
+    Caller caller;
+    if (!callerOf(uid, &caller) || !snapshot(args[0], archive, kArchiveLimit, caller)
+        || !snapshot(args[1], sumsPath, 65536, caller) || !snapshot(args[2], sigPath, 64, caller)) return false;
     const QByteArray sums = readSmall(sumsPath);
     QString error;
     if (!verifyArchive(archive, sums, readSmall(sigPath), version(), !update, &error)) {
