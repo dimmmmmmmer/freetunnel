@@ -200,6 +200,9 @@
     <string name="text_export_config">"Экспорт конфига"</string>
     <string name="export_toml">"Экспорт .toml…"</string>
     <string name="export_deep_link">"Скопировать deep-link"</string>
+    <string name="export_qr">"Показать QR-код"</string>
+    <string name="export_qr_hint">"Сканируйте в FreeTunnel на Android"</string>
+    <string name="qr_too_long">"Ссылка слишком длинная для QR-кода — экспортируйте .toml"</string>
     <string name="config_exported">"Конфиг экспортирован — файл содержит пароль"</string>
     <string name="deep_link_copied">"Deep-link скопирован — он содержит пароль, делитесь осторожно"</string>
     <string name="deep_link_failed">"Не удалось собрать deep-link"</string>

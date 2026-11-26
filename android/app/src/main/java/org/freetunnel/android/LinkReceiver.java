@@ -413,8 +413,10 @@ final class LinkReceiver {
      * text's QR code with the 4-module quiet zone scanners need, at the largest whole
      * number of pixels a module that fits in maxSide, so that it is never blurred.
      */
-    static Qr qr(String text, int maxSide) {
-        QrCode symbol = QrCode.encodeText(text, QrCode.Ecc.MEDIUM);
+    static Qr qr(String text, int maxSide) { return qr(text, maxSide, QrCode.Ecc.MEDIUM); }
+    /** The same at the error correction level given: LOW for a config's long link, as the desktop's (QrMatrix.cpp). */
+    static Qr qr(String text, int maxSide, QrCode.Ecc ecc) {
+        QrCode symbol = QrCode.encodeText(text, ecc);
         int modules = symbol.size + 8;
         int scale = Math.max(1, maxSide / modules);
         int side = modules * scale;

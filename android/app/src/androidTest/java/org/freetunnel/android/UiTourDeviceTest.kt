@@ -681,6 +681,32 @@ class UiTourDeviceTest {
             SystemClock.sleep(1_300)
             shot("home-connected", "Home connected: the logo at full opacity, the time under it"); done.add("home-connected")
 
+            // The local endpoint carries no user traffic. Feed a repeatable minute of counters
+            // through the speed meter so the graph's two lines can be reviewed in each theme.
+            onMain {
+                val meter = field("speedMeter").get(act()) as SpeedMeter
+                val history = field("speedHistory").get(act()) as SpeedHistory
+                history.clear()
+                meter.reset()
+                var rx = 0L
+                var tx = 0L
+                meter.sample(rx, tx, 0)
+                for (second in 1..SpeedHistory.CAPACITY) {
+                    val burst = if (second in 18..33 || second in 44..52) 1_300_000 else 0
+                    rx += 350_000 + burst + (second * 153_953 % 750_000)
+                    tx += 110_000 + (second * 37_001 % 450_000)
+                    meter.sample(rx, tx, second * 1000L)
+                    history.add(meter.downBytesPerSecond(), meter.upBytesPerSecond())
+                }
+                method("render").invoke(act())
+                (field("host").get(act()) as View).removeCallbacks(field("homeTicker").get(act()) as Runnable)
+            }
+            try {
+                shot("home-speed-graph", "Home with one minute of sample download and upload rates")
+            } finally {
+                onMain { method("scheduleHomeTick").invoke(act()) }
+            }
+
             // Disconnecting is the time between the user's Disconnect and the service saying it is off: too short to be caught, so the
             // flag Disconnect sets is set on the connected session, which is what the screen is in that time.
             onMain { field("stopping").setBoolean(act(), true) }
@@ -780,7 +806,16 @@ class UiTourDeviceTest {
             goTo(1)
             activate("config:1:export")
             awaitOverlay("select")
-            shot("configs-export-menu", "The export menu under a row's icon: Export .toml… and Copy deep-link")
+            shot("configs-export-menu", "The export menu under a row's icon: Export .toml…, Copy deep-link and Show QR code")
+        }
+        screen("configs-export-qr") {
+            goTo(1)
+            activate("config:1:export")
+            awaitOverlay("select")
+            activate("select:2")
+            awaitOverlay("qr")
+            shot("configs-export-qr", "QR export of the test configuration")
+            activate("qr:back")
         }
         screen("configs-delete-confirm") {
             goTo(1)

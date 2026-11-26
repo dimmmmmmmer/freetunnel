@@ -334,6 +334,7 @@ public final class MainActivity extends Activity {
         // Nothing animates while the app is not shown, and the speeds are of the time it is.
         hero.release();
         speedMeter.reset();
+        speedHistory.clear();
         // The logo does not animate across the time the app was not shown.
         homeFresh = true;
         AndroidUpdater.INSTANCE.observe(null);
@@ -507,7 +508,8 @@ public final class MainActivity extends Activity {
             // Nothing of Home is shown: its logo may not go on pulsing at views that are gone.
             hero.release();
             speedMeter.reset();
-            homeStatus = null; homeDown = null; homeUp = null; homeSelectorRow = null; homeSpeedRow = null;
+            speedHistory.clear();
+            homeStatus = null; homeDown = null; homeUp = null; homeSelectorRow = null; homeSpeedRow = null; homeGraph = null;
         }
         if (page == 0) home();
         else if (page == 4) {
@@ -1376,6 +1378,11 @@ public final class MainActivity extends Activity {
     private boolean homeFresh = true;
     private boolean resumed;
     private final SpeedMeter speedMeter = new SpeedMeter();
+    // The graph's height over the speed tiles.
+    private static final int HOME_GRAPH_HEIGHT = 40;
+    // The last minute of speeds, for the graph over the tiles: kept across renders of Home, as the meter is, and cleared with it.
+    private final SpeedHistory speedHistory = new SpeedHistory();
+    private View homeGraph;
     // Where the timer counts from when the service does not say (it always does, but a device test only sets the state).
     private long homeSeenUpAt;
     private long lastLogoClick;
@@ -1392,34 +1399,44 @@ public final class MainActivity extends Activity {
         stage.setClipChildren(false);
         pageRoot.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        // The speed tiles, pinned 44 above the bottom, whatever the logo and the selector do.
+        // The speed tiles, pinned 44 above the bottom, whatever the logo and the selector do, and over them, 8 above and as wide as
+        // both, the graph of the last minute's speeds (SpeedGraphView), on the tiles' ground: ↓ in its colour, ↑ in its.
         TextView[] down = new TextView[1];
         TextView[] up = new TextView[1];
+        LinearLayout foot = column();
+        foot.setGravity(Gravity.CENTER_HORIZONTAL);
+        SpeedGraphView graph = new SpeedGraphView(this, speedHistory, t.success, t.textDim);
+        graph.setBackground(ui.shape(t.tile, 8));
+        foot.addView(graph, lp(116 + 12 + 116, HOME_GRAPH_HEIGHT));
+        gap(foot, 8);
         LinearLayout speeds = row();
         speeds.setGravity(Gravity.CENTER);
         speeds.addView(ui.speedTile(R.drawable.ic_arrow_down, t.success, down), lp(116, 44));
         ui.gapH(speeds, 12);
         speeds.addView(ui.speedTile(R.drawable.ic_arrow_up, t.textDim, up), lp(116, 44));
+        foot.addView(speeds, lp(-2, -2));
         FrameLayout.LayoutParams speedsLp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         // 44 above the window's bottom, as the desktop's are: on a TV the host is already padded by the overscan, which the desktop's
         // 44 lies outside of, so that much less here. On a phone the window's bottom is the top of the navigation bar, and 44 is right.
         speedsLp.bottomMargin = dp(44) - overscanY;
-        stage.addView(speeds, speedsLp);
+        stage.addView(foot, speedsLp);
         // The speeds are of the time Home has been shown: a start is taken when it is shown, and the first tick after it gives a speed.
-        if (vpnState != 2) speedMeter.reset();
-        else if (!homeContinues) { speedMeter.reset(); sampleSpeeds(); }
+        if (vpnState != 2) { speedMeter.reset(); speedHistory.clear(); }
+        else if (!homeContinues) { speedMeter.reset(); speedHistory.clear(); sampleSpeeds(); }
+        homeGraph = graph;
         homeDown = down[0];
         homeUp = up[0];
         homeDown.setText(speedText(speedMeter.downBytesPerSecond()));
         homeUp.setText(speedText(speedMeter.upBytesPerSecond()));
-        homeSpeedRow = speeds;
+        // The toast's gap ends at the graph, the top of what is at the foot.
+        homeSpeedRow = foot;
 
         // Above them, 22 clear, the logo, its line and the selector as one column, in the middle of what is left and 6 below it. (A
         // FrameLayout puts a centred child at the middle plus its top margin less its bottom margin, the whole of each: the 6 is the margin.)
         FrameLayout area = new FrameLayout(this);
         area.setClipChildren(false);
         FrameLayout.LayoutParams areaLp = new FrameLayout.LayoutParams(-1, -1);
-        areaLp.bottomMargin = dp(44 + 44 + 22) - overscanY;
+        areaLp.bottomMargin = dp(44 + 44 + 8 + HOME_GRAPH_HEIGHT + 22) - overscanY;
         stage.addView(area, areaLp);
         LinearLayout column = column();
         column.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -1581,6 +1598,8 @@ public final class MainActivity extends Activity {
         sampleSpeeds();
         if (homeDown != null) homeDown.setText(speedText(speedMeter.downBytesPerSecond()));
         if (homeUp != null) homeUp.setText(speedText(speedMeter.upBytesPerSecond()));
+        speedHistory.add(speedMeter.downBytesPerSecond(), speedMeter.upBytesPerSecond());
+        if (homeGraph != null) homeGraph.invalidate();
     }
 
     // The config dropdown, right on Home (qml/pages/HomePage.qml, cfgPopup): under the selector, 6 below it and centred on it, as
@@ -1853,12 +1872,15 @@ public final class MainActivity extends Activity {
         } catch (Exception e) { return null; }
     }
 
-    // The export icon's choices, under it with no check mark: the config as a .toml file, through the system's file picker,
-    // and as a tt:// link on the clipboard. Both carry the password, which the notice afterwards says.
+    // Each export uses the configuration selected in this row.
     private void exportMenu(Config config, int index) {
-        String[] options = {getString(R.string.export_toml), getString(R.string.export_deep_link)};
+        String[] options = {getString(R.string.export_toml), getString(R.string.export_deep_link), getString(R.string.export_qr)};
         final String key = "config:" + index + ":export";
-        Overlay menu = showSelect(key, options, -1, which -> { if (which == 0) exportToml(config); else copyDeepLink(config); });
+        Overlay menu = showSelect(key, options, -1, which -> {
+            if (which == 0) exportToml(config);
+            else if (which == 1) copyDeepLink(config);
+            else showConfigQr(config);
+        });
         // The desktop anchors it to the icon's cell, which is the whole 56 high slot of the row: 4 below that. The icon's own is 40 high
         // here, in a row of 48, so the cell is 8 more above and below it.
         menu.layer.setAnchor(l -> {
@@ -1897,12 +1919,58 @@ public final class MainActivity extends Activity {
             runOnUiThread(() -> { if (!isDestroyed()) toast(getString(ok ? R.string.config_exported : R.string.export_failed)); });
         });
     }
-    private void copyDeepLink(Config config) {
-        String link = null;
+    private static String deepLinkOf(Config config) {
         try {
             DeepLinkImport.Link described = DeepLinkImport.linkOf(config.name, RoutingConfig.validate(config.toml));
-            if (described != null) link = DeepLinkImport.encode(described);
-        } catch (Exception e) { link = null; }
+            return described == null ? null : DeepLinkImport.encode(described);
+        } catch (Exception e) { return null; }
+    }
+
+    private void showConfigQr(Config config) {
+        String link = deepLinkOf(config);
+        if (link == null) { toast(getString(R.string.deep_link_failed)); return; }
+        int cardWidth = Math.min(dp(356), pageWidthPx() - dp(28));
+        int safeHeight = host.getHeight() - Math.max(dp(40), host.getPaddingTop())
+                - Math.max(dp(12), host.getPaddingBottom());
+        int side = Math.max(dp(96), Math.min(cardWidth - dp(32), safeHeight - dp(108)));
+        final LinkReceiver.Qr qr;
+        try { qr = LinkReceiver.qr(link, side, io.nayuki.qrcodegen.QrCode.Ecc.LOW); }
+        catch (io.nayuki.qrcodegen.DataTooLongException e) { toast(getString(R.string.qr_too_long)); return; }
+
+        LinearLayout card = column();
+        card.addView(ui.cardHeader(config.name, "qr:back", getString(R.string.text_back),
+                v -> closeOverlay(overlay("qr"))), lp(-1, -2));
+        LinearLayout body = column();
+        body.setGravity(Gravity.CENTER_HORIZONTAL);
+        body.setPadding(dp(12), 0, dp(12), dp(14));
+        ImageView code = new ImageView(this);
+        Bitmap bitmap = Bitmap.createBitmap(qr.pixels, qr.side, qr.side, Bitmap.Config.ARGB_8888);
+        bitmap.setDensity(Bitmap.DENSITY_NONE);
+        code.setImageBitmap(bitmap);
+        code.setScaleType(ImageView.ScaleType.CENTER);
+        code.setKeepScreenOn(true);
+        code.setContentDescription(getString(R.string.export_qr));
+        body.addView(code, new LinearLayout.LayoutParams(qr.side, qr.side));
+        gap(body, 10);
+        TextView hint = label(getString(R.string.export_qr_hint), 12, t().textDim);
+        hint.setGravity(Gravity.CENTER);
+        body.addView(hint, lp(-1, -2));
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setFocusable(false);
+        scroll.addView(body);
+        card.addView(scroll, lp(-1, -2));
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        Overlay overlay = showOverlay("qr", OverlayLayer.Kind.CARD, card, null, () -> {
+            code.setImageDrawable(null);
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        });
+        overlay.width(cardWidth);
+        overlay.defaultKey = "qr:back";
+    }
+
+    private void copyDeepLink(Config config) {
+        String link = deepLinkOf(config);
         if (link == null) { toast(getString(R.string.deep_link_failed)); return; }
         ClipData clip = ClipData.newPlainText("FreeTunnel link", link);
         // The link holds the password: a keyboard's clipboard history and the preview Android shows are asked to leave it out.
