@@ -55,4 +55,47 @@ public class SubscriptionDataTest {
         assertEquals(1, urls.size()); assertNull(urls.get(0).getUserInfo());
         assertEquals("/a%2Fb", urls.get(0).getRawPath()); assertEquals("key=a%2Bb", urls.get(0).getRawQuery());
     }
+    @Test public void addressHoldsTheDesktopsLimitAndTextRules() throws Exception {
+        String head = "https://example.org/";
+        StringBuilder fill = new StringBuilder(head);
+        while (fill.length() < 2048) fill.append('a');
+        assertNotNull(SubscriptionData.address(fill.toString()));
+        String tooLong = fill + "a";
+        assertThrows(Exception.class, () -> SubscriptionData.address(tooLong));
+        // Bytes, not characters: 1000 two-byte letters (2020 bytes) pass, 1020 (2060) do not.
+        StringBuilder wide = new StringBuilder(head); for (int i = 0; i < 1000; i++) wide.append('\u00e9');
+        assertNotNull(SubscriptionData.address(wide.toString()));
+        for (int i = 0; i < 20; i++) wide.append('\u00e9');
+        String tooWide = wide.toString();
+        assertThrows(Exception.class, () -> SubscriptionData.address(tooWide));
+        for (String bad : new String[]{"https://example.org/a b", "https://example.org/a\tb", "https://example.org/a\u00a0b",
+                "https://example.org/a\u200bb", "https://example.org/a\u202eb", "https://example.org/a\u0085b", "https://example.org/a\ud800b"})
+            assertThrows(bad, Exception.class, () -> SubscriptionData.address(bad));
+    }
+    @Test public void redirectFromAnEmptyPathKeepsItsSlash() throws Exception {
+        assertEquals("https://sub.example.com/v1/sub", SubscriptionData.resolveRedirect(new URI("https://sub.example.com"), "v1/sub").toString());
+        assertEquals("https://sub.example.com/v1/sub", SubscriptionData.resolveRedirect(new URI("https://sub.example.com?x=1"), "v1/sub").toString());
+        assertEquals("https://sub.example.com:8443/a?b=2", SubscriptionData.resolveRedirect(new URI("https://sub.example.com:8443?x=1"), "/a?b=2").toString());
+        assertEquals("https://sub.example.com/?b=2", SubscriptionData.resolveRedirect(new URI("https://sub.example.com?x=1"), "?b=2").toString());
+        // A base with a path resolves as it always did.
+        assertEquals("https://sub.example.com/a/c", SubscriptionData.resolveRedirect(new URI("https://sub.example.com/a/b?x=1"), "c").toString());
+    }
+    @Test public void relativeRedirectFromAnEmptyPathIsFollowedOnTheSameOrigin() throws Exception {
+        List<URI> urls = new ArrayList<>();
+        byte[] body = "{\"version\":1}".getBytes(StandardCharsets.UTF_8);
+        byte[] got = SubscriptionData.fetch("https://sub.example.com", uri -> {
+            urls.add(uri);
+            final boolean first = urls.size() == 1;
+            return new HttpURLConnection(uri.toURL()) {
+                @Override public int getResponseCode() { return first ? 302 : 200; }
+                @Override public String getHeaderField(String name) { return first ? "v1/sub" : null; }
+                @Override public InputStream getInputStream() { return new ByteArrayInputStream(body); }
+                @Override public void connect() { }
+                @Override public void disconnect() { }
+                @Override public boolean usingProxy() { return false; }
+            };
+        });
+        assertArrayEquals(body, got);
+        assertEquals(2, urls.size()); assertEquals("https://sub.example.com/v1/sub", urls.get(1).toString());
+    }
 }

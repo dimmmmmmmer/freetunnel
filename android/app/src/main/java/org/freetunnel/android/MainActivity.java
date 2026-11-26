@@ -688,6 +688,19 @@ public final class MainActivity extends Activity {
     private final List<Overlay> overlays = new ArrayList<>();
     private boolean pageBlocked;
 
+    // FLAG_SECURE is one flag on the window, and more than one card may want it (the editor shows the VPN password, the
+    // subscription form an address that holds credentials). Each holder acquires it as its card opens and releases it as that
+    // card closes, so closing the top card does not take the protection from the one under it. Main thread only, as the
+    // overlays are; per instance, and a recreated activity starts its window, and its count, from nothing.
+    private int secureWindowHolders;
+    private void secureWindowAcquire() {
+        if (secureWindowHolders++ == 0) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+    }
+    private void secureWindowRelease() {
+        if (secureWindowHolders == 0) return;
+        if (--secureWindowHolders == 0) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+    }
+
     private final class Overlay {
         final String name;
         final OverlayLayer.Kind kind;
@@ -1951,9 +1964,10 @@ public final class MainActivity extends Activity {
             try { SubscriptionData.address(source); } catch (Exception error) { toast(getString(R.string.subscription_failed)); return; }
             closeOverlay(shown[0]); beginSubscription(source, null, null);
         }); actions.addView(add, lp(-2, 34)); form.addView(actions, lp(-1, -2));
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        shown[0] = showOverlay("subscription", OverlayLayer.Kind.CARD, form, null,
-                () -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE));
+        // showOverlay returns the card that is up, and drops this onClose, when there is one: only a new card holds the flag.
+        boolean opening = overlay("subscription") == null;
+        if (opening) secureWindowAcquire();
+        shown[0] = showOverlay("subscription", OverlayLayer.Kind.CARD, form, null, opening ? this::secureWindowRelease : null);
     }
     private void beginSubscription(String source, String origin, Answered done) {
         if (subscriptionLoading) { toast(getString(R.string.subscription_updating)); answered(done, true); return; }
@@ -2649,11 +2663,13 @@ public final class MainActivity extends Activity {
         scroll.addView(form);
         card.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        // showOverlay returns the editor that is up, and drops this onClose, when there is one: only a new one holds the flag.
+        boolean opening = overlay("editor") == null;
+        if (opening) secureWindowAcquire();
         Overlay overlay = showOverlay("editor", OverlayLayer.Kind.CARD, card, null, () -> {
             validationRequest++;
             certificateTarget = null;
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            if (opening) secureWindowRelease();
         });
         shown[0] = overlay;
         overlay.width(dp(372));

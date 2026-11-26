@@ -20,7 +20,7 @@ final class SubscriptionData {
         Document(String name, String toml) { this.name = name; this.toml = toml; }
     }
     static URI address(String source) throws Exception {
-        if (source == null || source.getBytes(StandardCharsets.UTF_8).length > 2560) throw new IOException("Invalid subscription address");
+        if (source == null || !DeepLinkImport.isSubscriptionText(source)) throw new IOException("Invalid subscription address");
         URI uri = new URI(source);
         if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getPort() == 0 || uri.getPort() > 65535) throw new IOException("Invalid subscription address");
         String info = uri.getUserInfo();
@@ -70,7 +70,7 @@ final class SubscriptionData {
                 if (status >= 300 && status < 400) {
                     String location = c.getHeaderField("Location");
                     if (location == null) throw new IOException("Invalid redirect");
-                    URI next = uri.resolve(location);
+                    URI next = resolveRedirect(uri, location);
                     if (!"https".equals(next.getScheme()) || next.getHost() == null || next.getRawUserInfo() != null
                             || !original.getHost().equalsIgnoreCase(next.getHost()) || port(original) != port(next)) throw new IOException("Cross-origin redirect refused");
                     uri = next; continue;
@@ -90,6 +90,16 @@ final class SubscriptionData {
             } finally { c.disconnect(); }
         }
         throw new IOException("Too many redirects");
+    }
+    // URI.resolve drops the slash when the base path is empty ("https://host" resolved
+    // against "v1/sub" gives "https://hostv1/sub"), so an empty path is made "/" first.
+    // The base query stays: resolve gives a reference with a path no query of the
+    // base's (RFC 3986 5.2.2), and one with no path, such as "?a=1", its own or the base's.
+    static URI resolveRedirect(URI base, String location) throws Exception {
+        String path = base.getRawPath();
+        if (path != null && !path.isEmpty()) return base.resolve(location);
+        return new URI(base.getScheme() + "://" + base.getRawAuthority() + "/"
+                + (base.getRawQuery() == null ? "" : "?" + base.getRawQuery())).resolve(location);
     }
     private static int port(URI uri) { return uri.getPort() < 0 ? 443 : uri.getPort(); }
     private static int remaining(long deadline) throws IOException {

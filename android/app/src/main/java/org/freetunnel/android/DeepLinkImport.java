@@ -235,15 +235,23 @@ final class DeepLinkImport {
     }
 
     private static boolean isValidSubscriptionUrl(String url) {
-        if (!url.startsWith("https://")) return false;
+        return url.startsWith("https://") && isSubscriptionText(url);
+    }
+
+    // What the desktop's parseSubscriptionUrl takes of an address before it parses
+    // it (kMaxSubscriptionUrlBytes of UTF-8, valid UTF-16, isWireText), shared with
+    // SubscriptionData.address so a link and a pasted address are held to one rule.
+    static boolean isSubscriptionText(String url) {
         if (url.getBytes(StandardCharsets.UTF_8).length > MAX_SUBSCRIPTION_URL_BYTES) return false;
         // Control characters include tab and line breaks; space characters include
         // no-break and other Unicode spaces. Together they cover all whitespace.
         // Format characters are invisible ones such as U+200B and U+202E. By code
-        // point, so one outside the BMP is not let through as two surrogates.
+        // point, so one outside the BMP is not let through as two surrogates. A
+        // surrogate left alone is no text (getBytes would turn it into "?").
         for (int i = 0; i < url.length(); ) {
             int c = url.codePointAt(i);
-            if (Character.isISOControl(c) || Character.isSpaceChar(c) || Character.getType(c) == Character.FORMAT)
+            int type = Character.getType(c);
+            if (Character.isISOControl(c) || Character.isSpaceChar(c) || type == Character.FORMAT || type == Character.SURROGATE)
                 return false;
             i += Character.charCount(c);
         }
