@@ -75,6 +75,7 @@ struct RootView: View {
                         state: state, profile: state.preferences.profiles.first { $0.id == id })
                 case .importText: ImportView(state: state)
                 case .subscription: ImportView(state: state, subscriptionOnly: true)
+                case .qr(let id): QRCodeDialog(state: state, id: id)
                 }
             }
             if let confirmation = state.confirmation {
