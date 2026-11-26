@@ -75,6 +75,18 @@ import XCTest
         XCTAssertFalse(app.buttons["server-edit-Renamed"].exists)
         capture("empty-servers-after-delete")
     }
+    func testExportMenuOpensTheQRCode() {
+        app.launch()
+        importConfig()
+        app.buttons["Export config"].firstMatch.tap()
+        let show = app.buttons["export.qr"]
+        XCTAssertTrue(show.waitForExistence(timeout: 5))
+        show.tap()
+        XCTAssertTrue(app.images["qr.code"].waitForExistence(timeout: 5))
+        capture("export-qr")
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertFalse(app.images["qr.code"].exists)
+    }
     func testInvalidImportDoesNotCreateServer() {
         app.launchEnvironment["FT_UI_TEST_CLIPBOARD"] = "tt://not-a-valid-config"
         app.launch()
