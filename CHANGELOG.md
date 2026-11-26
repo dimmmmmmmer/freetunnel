@@ -7,6 +7,8 @@
 - When a client waits for a server greeting and FreeTunnel needs a hostname to select its route, the connection now times out after 10 seconds. An IP or application rule lets the greeting through immediately.
 - The application picker explains how to route shared system DNS in Through VPN mode.
 - If a connection fails or is cancelled while FreeTunnel is selecting its final route, both sides of the pending connection are cleaned up.
+- Android updates a subscription from a server with its own certificate: it trusts the certificate the link or configuration pins and connects to the server's address, as the desktop app does.
+- On Android, a subscription address is held to the same rules as on desktop, and a relative redirect from an address without a path is followed correctly.
 
 ## 1.3.2
 

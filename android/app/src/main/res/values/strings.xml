@@ -281,6 +281,8 @@
     <string name="subscription_stop_question">Stop subscription updates?</string>
     <string name="subscription_host_changed">The subscription changes the server from %1$s to %2$s. Apply?</string>
     <string name="subscription_review">Subscription changed its server. Refresh it to review.</string>
+    <string name="subscription_bad_pin">"The config's certificate can't be read; ask your provider for a new link"</string>
+    <string name="subscription_untrusted">Certificate not trusted; ask your provider for a new link</string>
     <string name="editor_tls_profile">TLS profile</string>
     <string name="editor_tls_hint">"This server only. Leave it on Chrome unless the server asks for another."</string>
     <string name="picker_apply">Apply</string>
