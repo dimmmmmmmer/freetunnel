@@ -4,28 +4,14 @@ import Security
 
 public enum Subscription {
     public static let maximumBytes = 65_536
+    /// The address read by the desktop's rules (`SubscriptionURL`), as a request for the
+    /// system's HTTP stack. Credentials are a header of ours, never part of the URL.
     public static func request(_ text: String) throws -> URLRequest {
-        guard var parts = URLComponents(string: text), parts.scheme == "https",
-            parts.host?.isEmpty == false, parts.port != 0, (parts.port ?? 443) <= 65535,
-            !(parts.user ?? "").contains(":"), text.utf8.count <= 2560
+        guard let parsed = SubscriptionURL.parse(text), let url = URL(string: parsed.urlString)
         else { throw ClientError.invalidSource }
-        let user = parts.user ?? ""
-        let password = parts.password ?? ""
-        guard
-            !(user + password).unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 })
-        else {
-            throw ClientError.invalidSource
-        }
-        parts.fragment = nil
-        parts.user = nil
-        parts.password = nil
-        guard let url = parts.url else { throw ClientError.invalidSource }
         var request = URLRequest(url: url)
-        let credentials = Data((user + ":" + password).utf8).base64EncodedString()
-        if !user.isEmpty || !password.isEmpty {
-            request.setValue(
-                "Basic " + credentials,
-                forHTTPHeaderField: "Authorization")
+        if let authorization = parsed.authorization {
+            request.setValue(authorization, forHTTPHeaderField: "Authorization")
         }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request

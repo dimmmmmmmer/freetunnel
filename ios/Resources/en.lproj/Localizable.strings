@@ -249,3 +249,7 @@
 "TLS profile" = "TLS profile";
 
 "This server only. Leave it on Chrome unless the server asks for another." = "This server only. Leave it on Chrome unless the server asks for another.";
+
+/* Subscription fetch (pinned to the config's certificate, as on desktop and Android) */
+"subscriptionUntrusted" = "Certificate not trusted; ask your provider for a new link";
+"subscriptionBadPin" = "The config's certificate can't be read; ask your provider for a new link";

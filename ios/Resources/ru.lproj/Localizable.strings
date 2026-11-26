@@ -249,3 +249,7 @@
 "TLS profile" = "Профиль TLS";
 
 "This server only. Leave it on Chrome unless the server asks for another." = "Только для этого сервера. Оставьте Chrome, если сервер не просит другой профиль.";
+
+/* Subscription fetch (pinned to the config's certificate, as on desktop and Android) */
+"subscriptionUntrusted" = "Сертификату нет доверия; попросите у провайдера новую ссылку";
+"subscriptionBadPin" = "Не удаётся прочитать сертификат конфига; попросите у провайдера новую ссылку";

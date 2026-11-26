@@ -292,8 +292,8 @@ extension AppState {
             guard let url = record.subscription else { throw ClientError.invalidSource }
             let previous = try Configuration(record.toml)
             if !manual && !(previous.endpoint["custom_sni"] as? String ?? "").isEmpty { return }
-            let data = try await Downloads.read(
-                Subscription.request(url), limit: Subscription.maximumBytes)
+            let data = try await Downloads.subscription(
+                url, trust: SubscriptionTrust(config: previous))
             let text = try Subscription.apply(data, previous: record.toml)
             let changed = try Configuration(text)
             let apply = {

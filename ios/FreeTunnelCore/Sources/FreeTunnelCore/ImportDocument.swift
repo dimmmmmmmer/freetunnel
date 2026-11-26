@@ -7,9 +7,13 @@ public enum ImportDocument {
     public struct Document {
         public var toml: String?
         public var subscription: String?
-        public init(toml: String?, subscription: String?) {
+        /// What the same text vouches for the subscription's server with: its hostname,
+        /// addresses and certificate. A fetch pins to them only for that server's own host.
+        public var trust: SubscriptionTrust?
+        public init(toml: String?, subscription: String?, trust: SubscriptionTrust? = nil) {
             self.toml = toml
             self.subscription = subscription
+            self.trust = trust
         }
     }
     public static func isLink(_ text: String) -> Bool {
@@ -33,17 +37,24 @@ public enum ImportDocument {
         var endpoint = root["endpoint"] as? [String: Any] ?? root
         let source = try subscriptionSource(&endpoint)
         try normalizeEndpoint(&endpoint)
+        let trust = source == nil ? nil : subscriptionTrust(endpoint)
         if root["endpoint"] == nil {
             if endpoint["hostname"] != nil { try requireCredentials(endpoint) }
             root = [:]
         }
         root["endpoint"] = endpoint
         if endpoint["hostname"] == nil, source != nil {
-            return Document(toml: nil, subscription: source)
+            return Document(toml: nil, subscription: source, trust: trust)
         }
         return Document(
             toml: try Configuration(Configuration.serialize(root)).serialized(),
-            subscription: source)
+            subscription: source, trust: trust)
+    }
+    private static func subscriptionTrust(_ endpoint: [String: Any]) -> SubscriptionTrust {
+        SubscriptionTrust(
+            hostname: endpoint["hostname"] as? String ?? "",
+            addresses: (endpoint["addresses"] as? [String] ?? []).joined(separator: ", "),
+            certificate: endpoint["certificate"] as? String ?? "")
     }
     private static func subscriptionSource(_ endpoint: inout [String: Any]) throws -> String? {
         let value =
@@ -202,12 +213,16 @@ public enum ImportDocument {
         var endpoint = try fields(records)
         let source = try records[14].map(string)
         if let source { _ = try Subscription.request(source) }
-        if addresses.isEmpty, source != nil { return Document(toml: nil, subscription: source) }
         endpoint["addresses"] = addresses
+        if addresses.isEmpty, source != nil {
+            return Document(toml: nil, subscription: source, trust: subscriptionTrust(endpoint))
+        }
         try requireCredentials(endpoint)
         try normalizeEndpoint(&endpoint)
         let text = try Configuration.serialize(["endpoint": endpoint])
-        return Document(toml: try Configuration(text).serialized(), subscription: source)
+        return Document(
+            toml: try Configuration(text).serialized(), subscription: source,
+            trust: source == nil ? nil : subscriptionTrust(endpoint))
     }
     private static func validateVersionAndAuth(_ records: [Int: [UInt8]]) throws {
         if let version = records[0], try number(version) > 2 { throw ClientError.unsupportedFormat }

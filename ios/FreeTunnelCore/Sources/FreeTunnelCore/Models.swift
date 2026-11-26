@@ -3,6 +3,7 @@ import Foundation
 public enum ClientError: String, Error, LocalizedError {
     case invalidConfig, invalidSource, invalidList, tooLarge, emptyList, unsupportedFormat
     case missingSecret, storageFailed, networkFailed, tunnelFailed, insecureConfig
+    case subscriptionUntrusted, subscriptionBadPin
     public var errorDescription: String? { NSLocalizedString(rawValue, comment: "") }
 }
 public enum Direction: String, Codable, CaseIterable, Identifiable {
