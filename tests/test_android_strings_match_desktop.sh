@@ -75,6 +75,8 @@ cat > "$TMP/table.jsonl" <<'TABLE'
 ["import_mixed_name", "Backend", "This name mixes letters from different alphabets."]
 ["import_subscription_note", "ConfigImport", "Subscriptions aren't supported yet: this server won't update itself, and its subscription address isn't saved."]
 ["import_certificate_note", "ConfigImport", "Extra data in the certificate was ignored."]
+["subscription_bad_pin", "SubscriptionFetcher", "The config's certificate can't be read; ask your provider for a new link"]
+["subscription_untrusted", "SubscriptionFetcher", "Certificate not trusted; ask your provider for a new link"]
 ["text_tls_profile_unknown", "Backend", "The TLS profile is not one TrustTunnel knows"]
 ["import_confirm", "Main", "Import"]
 ["import_add_copy", "Main", "Add copy"]

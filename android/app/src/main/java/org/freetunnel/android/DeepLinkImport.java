@@ -91,7 +91,10 @@ final class DeepLinkImport {
                 || s.startsWith("https://www.trusttunnel.org/qr.html");
     }
 
-    static String subscription(String link) throws ParseException {
+    // The subscription address a link carries, with the server the same link names: what a fetch of it trusts
+    // (SubscriptionData.requestFor). Null when the link has no address. The certificate is as a link keeps it,
+    // only certificates and as PEM, so a link whose certificate holds no certificate pins nothing.
+    static SubscriptionData.Offer subscription(String link) throws ParseException {
         String payload = extractPayload(link);
         byte[] bytes;
         try { bytes = Base64.getUrlDecoder().decode(payload); }
@@ -100,7 +103,11 @@ final class DeepLinkImport {
         if (declaredVersion(bytes) > MAX_READ_VERSION) throw new ParseException(R.string.text_unsupported_link_version);
         Fields fields = decode(bytes);
         if (!fields.authKey.isEmpty()) throw new ParseException(R.string.text_this_server_needs_a_newer_trusttunnel_core);
-        return fields.subscriptionUrl;
+        if (fields.subscriptionUrl == null) return null;
+        Certificates.Kept certificate = Certificates.fromDer(fields.certificate);
+        return new SubscriptionData.Offer(fields.subscriptionUrl, new SubscriptionData.Trust(
+                fields.hostname == null ? "" : clean(fields.hostname).trim(), String.join(", ", fields.addresses),
+                certificate == null ? "" : certificate.pem));
     }
 
     static Imported parse(String link) throws ParseException {
