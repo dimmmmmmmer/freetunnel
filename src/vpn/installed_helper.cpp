@@ -51,9 +51,8 @@ bool protectedDirectory(const QString &path, bool create)
 // Root's identity is put back when this goes; anything short of that aborts.
 class CallerAccess {
 public:
-    explicit CallerAccess(quint32 uid) {
+    explicit CallerAccess(quint32 uid) : m_rootGid(::getegid()) {
         // Group calls need euid 0, so save root's own groups before changing.
-        m_rootGid = ::getegid();
         const int count = ::getgroups(0, nullptr);
         if (count < 0) return;
         m_rootGroups.resize(static_cast<size_t>(count));
