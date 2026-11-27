@@ -171,7 +171,7 @@ jobs:
           name: android-patched-core
           path: android/app/libs
       - run: scripts/prepare-trusttunnel-android.sh
-      - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease :app:bundleRelease
+      - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest :app:resolveConnectedTestDependencies :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease :app:bundleRelease
         working-directory: android
       # What TV launchers and app stores read once the AAR's manifest is merged in,
       # which lint doesn't see.
