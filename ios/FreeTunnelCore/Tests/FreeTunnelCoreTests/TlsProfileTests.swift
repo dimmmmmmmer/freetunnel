@@ -15,12 +15,17 @@ final class TlsProfileTests: XCTestCase {
         func record(_ tag: UInt8, _ text: String) -> [UInt8] {
             [tag, UInt8(text.utf8.count)] + Array(text.utf8)
         }
-        let bytes =
-            [0, 1, 2] + record(1, "vpn.example.com") + record(5, "alice") + record(6, "s3cret")
-            + record(2, "1.2.3.4:443") + extra
-        return "tt://?"
-            + Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-")
+        // Appended a part at a time: one long chain of + took the type checker too long.
+        var bytes: [UInt8] = [0, 1, 2]
+        bytes += record(1, "vpn.example.com")
+        bytes += record(5, "alice")
+        bytes += record(6, "s3cret")
+        bytes += record(2, "1.2.3.4:443")
+        bytes += extra
+        let base64: String = Data(bytes).base64EncodedString()
+        let urlSafe: String = base64.replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        return "tt://?" + urlSafe
     }
     func profile(_ link: String) throws -> String? {
         let config = try Configuration(XCTUnwrap(ImportDocument.parse(link).toml))
