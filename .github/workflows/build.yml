@@ -157,7 +157,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install rasterizers
-        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
+        run: |
+          # The image's packages.microsoft.com source is nothing we install from, and its 403s failed apt-get update.
+          sudo find /etc/apt/sources.list.d -type f -exec grep -q packages.microsoft.com {} \; -delete
+          sudo apt-get update && sudo apt-get install -y librsvg2-bin icnsutils imagemagick
       - name: Render icons from logo.svg
         run: bash scripts/render-icons.sh icons-out
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -368,6 +371,8 @@ jobs:
         # the default is `sh -e {0}` (dash), so the Linux steps name it.
         shell: bash -e {0}
         run: |
+          # The image's packages.microsoft.com source is nothing we install from, and its 403s failed apt-get update.
+          sudo find /etc/apt/sources.list.d -type f -exec grep -q packages.microsoft.com {} \; -delete
           sudo apt-get update
           # Modern clang (the core is clang-only; jammy's default clang 14 is too old).
           # The installer is vendored in this repo rather than fetched from
@@ -1611,6 +1616,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -eu
+          # The image's packages.microsoft.com source is nothing we install from, and its 403s failed apt-get update.
+          sudo find /etc/apt/sources.list.d -type f -exec grep -q packages.microsoft.com {} \; -delete
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends libopengl0 libgl1 libegl1 libxcb-cursor0 libxkbcommon-x11-0 xvfb xauth nftables iproute2
           # Hosted runners share a writable /opt with their tool installers.

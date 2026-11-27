@@ -117,6 +117,8 @@ jobs:
       - name: Install build deps (Linux)
         if: needs.changes.outputs.desktop != 'false' && runner.os == 'Linux'
         run: |
+          # The image's packages.microsoft.com source is nothing we install from, and its 403s failed apt-get update.
+          sudo find /etc/apt/sources.list.d -type f -exec grep -q packages.microsoft.com {} \; -delete
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
             dbus-x11 gnome-keyring libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 nftables iproute2
@@ -244,6 +246,8 @@ jobs:
 
       - name: Install deps
         run: |
+          # The image's packages.microsoft.com source is nothing we install from, and its 403s failed apt-get update.
+          sudo find /etc/apt/sources.list.d -type f -exec grep -q packages.microsoft.com {} \; -delete
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config lcov \
             libfuse2 libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 git python3-pip \
@@ -327,6 +331,8 @@ jobs:
 
       - name: Install deps
         run: |
+          # The image's packages.microsoft.com source is nothing we install from, and its 403s failed apt-get update.
+          sudo find /etc/apt/sources.list.d -type f -exec grep -q packages.microsoft.com {} \; -delete
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev libsecret-1-dev pkg-config \
             dbus-x11 gnome-keyring libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 nftables iproute2

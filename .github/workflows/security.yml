@@ -95,6 +95,8 @@ jobs:
       - name: Install cppcheck
         run: |
           set -eu
+          # The image's packages.microsoft.com source is nothing we install from, and its 403s failed apt-get update.
+          sudo find /etc/apt/sources.list.d -type f -exec grep -q packages.microsoft.com {} \; -delete
           sudo apt-get update && sudo apt-get install -y cppcheck
           # 24.04 ships 2.13. Say so if the image ever hands us another.
           v="$(cppcheck --version)"
@@ -170,6 +172,8 @@ jobs:
 
       - name: Install tools
         run: |
+          # The image's packages.microsoft.com source is nothing we install from, and its 403s failed apt-get update.
+          sudo find /etc/apt/sources.list.d -type f -exec grep -q packages.microsoft.com {} \; -delete
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build clang-tidy-18 libssl-dev libsecret-1-dev pkg-config \
             libxcb1-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0

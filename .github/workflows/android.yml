@@ -97,6 +97,8 @@ jobs:
       - name: Install native build tools
         if: steps.core-cache.outputs.cache-hit != 'true'
         run: |
+          # The image's packages.microsoft.com source is nothing we install from, and its 403s failed apt-get update.
+          sudo find /etc/apt/sources.list.d -type f -exec grep -q packages.microsoft.com {} \; -delete
           sudo apt-get update
           sudo apt-get install -y build-essential clang-18 g++-13 cmake ninja-build python3-venv pkg-config autoconf automake libtool perl golang
           python3 -m venv "$RUNNER_TEMP/core-tools"
