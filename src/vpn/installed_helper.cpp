@@ -111,7 +111,7 @@ bool sendDescriptor(int socket, int fd)
         header->cmsg_len = CMSG_LEN(sizeof(int));
         std::memcpy(CMSG_DATA(header), &fd, sizeof(int));
     }
-    ssize_t written;
+    ssize_t written = -1;
     do written = ::sendmsg(socket, &message, 0); while (written < 0 && errno == EINTR);
     return written == 1;
 }
@@ -126,7 +126,7 @@ int receiveDescriptor(int socket)
     alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))] = {};
     message.msg_control = control;
     message.msg_controllen = sizeof(control);
-    ssize_t got;
+    ssize_t got = -1;
     do got = ::recvmsg(socket, &message, 0); while (got < 0 && errno == EINTR);
     int fd = -1;
     if (got == 1 && !(message.msg_flags & MSG_CTRUNC)) {
