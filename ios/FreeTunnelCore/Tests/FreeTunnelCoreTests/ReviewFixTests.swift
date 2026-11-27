@@ -37,7 +37,8 @@ final class ReviewFixTests: XCTestCase {
     func testContentTypeMustBeJsonAsOnDesktop() async throws {
         func read(_ type: String?) async throws -> HTTPReply {
             let head = "HTTP/1.1 200 OK\r\n" + (type.map { "Content-Type: \($0)\r\n" } ?? "")
-            return try await HTTPResponseReader(CertificateAndReaderTests.Feed(head + "Content-Length: 2\r\n\r\n{}")).read()
+            let feed = CertificateAndReaderTests.Feed(head + "Content-Length: 2\r\n\r\n{}")
+            return try await HTTPResponseReader(feed).read()
         }
         for good in ["application/json", "Application/JSON; charset=utf-8", " application/json ;x=y"] {
             let reply = try await read(good)

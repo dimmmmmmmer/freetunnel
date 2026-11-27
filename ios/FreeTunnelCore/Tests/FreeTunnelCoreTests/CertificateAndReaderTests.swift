@@ -37,15 +37,15 @@ final class CertificateAndReaderTests: XCTestCase {
         XCTAssertFalse(wild.matches(name: "a.b.wild.test"))
         XCTAssertTrue(wild.matches(name: "mixed.test"))
         XCTAssertFalse(wild.matches(name: "10.0.0.1"))
-        let cn = try XCTUnwrap(X509Leaf(der: TestPKI.der(TestPKI.cnonlyPEM)))
-        XCTAssertEqual(cn.commonNames, ["cn.test"])
-        XCTAssertTrue(cn.matches(name: "cn.test"))
-        let ip = try XCTUnwrap(X509Leaf(der: TestPKI.der(TestPKI.ipv6PEM)))
-        XCTAssertTrue(ip.matches(name: "2001:db8::1"))
-        XCTAssertTrue(ip.matches(name: "[2001:DB8:0::1]"))
-        XCTAssertTrue(ip.matches(name: "10.1.2.3"))
-        XCTAssertFalse(ip.matches(name: "2001:db8::2"))
-        XCTAssertFalse(ip.matches(name: "vpn.test"))
+        let cnLeaf = try XCTUnwrap(X509Leaf(der: TestPKI.der(TestPKI.cnonlyPEM)))
+        XCTAssertEqual(cnLeaf.commonNames, ["cn.test"])
+        XCTAssertTrue(cnLeaf.matches(name: "cn.test"))
+        let ipLeaf = try XCTUnwrap(X509Leaf(der: TestPKI.der(TestPKI.ipv6PEM)))
+        XCTAssertTrue(ipLeaf.matches(name: "2001:db8::1"))
+        XCTAssertTrue(ipLeaf.matches(name: "[2001:DB8:0::1]"))
+        XCTAssertTrue(ipLeaf.matches(name: "10.1.2.3"))
+        XCTAssertFalse(ipLeaf.matches(name: "2001:db8::2"))
+        XCTAssertFalse(ipLeaf.matches(name: "vpn.test"))
         // The SAN is read in full, and the dates.
         let leaf = try XCTUnwrap(X509Leaf(der: TestPKI.leafDER))
         XCTAssertEqual(leaf.dnsNames, ["vpn.test"])
@@ -72,23 +72,28 @@ final class CertificateAndReaderTests: XCTestCase {
         try await HTTPResponseReader(Feed(text, split: split)).read()
     }
     func testReaderHandlesByteAtATimeInput() async throws {
-        let text = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2;x=y\r\nde\r\n0\r\n\r\n"
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        let text = head + "Transfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2;x=y\r\nde\r\n0\r\n\r\n"
         let reply = try await read(text, split: true)
         XCTAssertEqual(reply.body, Data("abcde".utf8))
-        let length = try await read("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 3\r\n\r\nabcEXTRA", split: true)
+        let length = try await read(head + "Content-Length: 3\r\n\r\nabcEXTRA", split: true)
         XCTAssertEqual(length.body, Data("abc".utf8))
     }
     func testReaderStatusLine() {
         for (line, status) in [
             ("HTTP/1.1 200 OK", 200), ("HTTP/1.0 404", 404), ("HTTP/1.1 301 ", 301)
         ] { XCTAssertEqual(HTTPResponseReader.status(of: line), status, line) }
-        for line in ["HTTP/2 200", "HTTP/1.2 200 OK", "HTTP/1.1 20 OK", "HTTP/1.1 2000", "HTTP/1.1  200", "", "http/1.1 200 OK"] {
+        for line in [
+            "HTTP/2 200", "HTTP/1.2 200 OK", "HTTP/1.1 20 OK", "HTTP/1.1 2000", "HTTP/1.1  200", "",
+            "http/1.1 200 OK"
+        ] {
             XCTAssertNil(HTTPResponseReader.status(of: line), line)
         }
     }
     func testReaderRefusesAnOverlongHeadOrLine() async throws {
         do {
-            _ = try await read("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" + String(repeating: "a", count: 9000) + ": x\r\n\r\n")
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+            _ = try await read(head + String(repeating: "a", count: 9000) + ": x\r\n\r\n")
             XCTFail("read")
         } catch { XCTAssertEqual(error as? SubscriptionFetchError, .invalid) }
         do {

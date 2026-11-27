@@ -5,6 +5,7 @@ import XCTest
 
 final class PinnedFetchTests: XCTestCase {
     let json = "{\"version\":1}"
+    let okHead = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
     let never: SubscriptionFetcher.Unpinned = { _ in
         XCTFail("the system's HTTP was used")
         return Data()
@@ -19,6 +20,12 @@ final class PinnedFetchTests: XCTestCase {
         try await SubscriptionFetcher.fetch(
             SubscriptionRequest.make(source, trust: trust), timeout: timeout, unpinned: never)
     }
+    func okServer(_ identity: String) throws -> TestTLSServer {
+        try TestTLSServer(identity: identity) { _, connection in TestTLSServer.ok(connection, self.json) }
+    }
+    func replyServer(_ text: String) throws -> TestTLSServer {
+        try TestTLSServer(identity: TestPKI.leafP12) { _, connection in TestTLSServer.reply(connection, text) }
+    }
     func failure(_ work: () async throws -> Data) async -> SubscriptionFetchError? {
         do {
             _ = try await work()
@@ -29,10 +36,10 @@ final class PinnedFetchTests: XCTestCase {
     // MARK: trust
 
     func testAPinnedLeafIsAcceptedAndTheRequestNamesTheServer() async throws {
-        let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.ok(c, self.json) }
+        let server = try okServer(TestPKI.leafP12)
         defer { server.stop() }
         let body = try await fetch("https://alice:s3cret@vpn.test/sub?x=1", trust(server.port))
-        XCTAssertEqual(String(decoding: body, as: UTF8.self), json)
+        XCTAssertEqual(String(bytes: body, encoding: .utf8), json)
         XCTAssertEqual(server.requests.count, 1)
         let head = server.requests[0]
         XCTAssertTrue(head.hasPrefix("GET /sub?x=1 HTTP/1.1\r\nHost: vpn.test\r\n"), head)
@@ -41,7 +48,7 @@ final class PinnedFetchTests: XCTestCase {
         XCTAssertFalse(head.contains("alice:s3cret@"))
     }
     func testALeafSignedByAPinnedCaIsRefusedAndNoRequestIsSent() async throws {
-        let server = try TestTLSServer(identity: TestPKI.bycAP12) { _, c in TestTLSServer.ok(c, self.json) }
+        let server = try okServer(TestPKI.bycAP12)
         defer { server.stop() }
         let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port, pin: TestPKI.caPEM)) }
         XCTAssertEqual(error, .untrusted)
@@ -51,29 +58,36 @@ final class PinnedFetchTests: XCTestCase {
         XCTAssertEqual(body.count, json.utf8.count)
     }
     func testAWrongNameAnExpiredAndAClientOnlyCertificateAreRefused() async throws {
-        let rows: [(String, String, String)] = [
-            (TestPKI.wrongP12, TestPKI.wrongPEM, "wrong name"),
-            (TestPKI.expiredP12, TestPKI.expiredPEM, "expired"),
-            (TestPKI.futureP12, TestPKI.futurePEM, "not yet valid"),
-            (TestPKI.clientP12, TestPKI.clientPEM, "client only")
+        struct Row {
+            let identity: String
+            let pin: String
+            let label: String
+        }
+        let rows = [
+            Row(identity: TestPKI.wrongP12, pin: TestPKI.wrongPEM, label: "wrong name"),
+            Row(identity: TestPKI.expiredP12, pin: TestPKI.expiredPEM, label: "expired"),
+            Row(identity: TestPKI.futureP12, pin: TestPKI.futurePEM, label: "not yet valid"),
+            Row(identity: TestPKI.clientP12, pin: TestPKI.clientPEM, label: "client only")
         ]
         for row in rows {
-            let server = try TestTLSServer(identity: row.0) { _, c in TestTLSServer.ok(c, self.json) }
+            let server = try TestTLSServer(identity: row.identity) { _, connection in
+                TestTLSServer.ok(connection, self.json)
+            }
             defer { server.stop() }
-            let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port, pin: row.1)) }
-            XCTAssertEqual(error, .untrusted, row.2)
-            XCTAssertEqual(server.requests.count, 0, row.2)
+            let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port, pin: row.pin)) }
+            XCTAssertEqual(error, .untrusted, row.label)
+            XCTAssertEqual(server.requests.count, 0, row.label)
         }
     }
     func testAnotherCertificateThanThePinIsRefused() async throws {
-        let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.ok(c, self.json) }
+        let server = try okServer(TestPKI.leafP12)
         defer { server.stop() }
         let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port, pin: TestPKI.wrongPEM)) }
         XCTAssertEqual(error, .untrusted)
         XCTAssertEqual(server.requests.count, 0)
     }
     func testUnreadablePinsFailAsBadPinBeforeDialling() async throws {
-        let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.ok(c, self.json) }
+        let server = try okServer(TestPKI.leafP12)
         defer { server.stop() }
         let garbage = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----"
         let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port, pin: garbage)) }
@@ -87,7 +101,7 @@ final class PinnedFetchTests: XCTestCase {
         XCTAssertEqual(error, .badURL)
     }
     func testAnUnpinnedRequestGoesThroughTheSystemAndNeverDials() async throws {
-        let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.ok(c, self.json) }
+        let server = try okServer(TestPKI.leafP12)
         defer { server.stop() }
         let seen = LockedBox<[URLRequest]>([])
         let body = try await SubscriptionFetcher.fetch(
@@ -103,11 +117,11 @@ final class PinnedFetchTests: XCTestCase {
     // MARK: redirects
 
     func testASameHostRedirectCarriesThePinAndTheCredentials() async throws {
-        let server = try TestTLSServer(identity: TestPKI.leafP12) { head, c in
+        let server = try TestTLSServer(identity: TestPKI.leafP12) { head, connection in
             if head.hasPrefix("GET /sub ") {
-                TestTLSServer.reply(c, "HTTP/1.1 302 Found\r\nLocation: next?a=1\r\nContent-Length: 0\r\n\r\n")
+                TestTLSServer.reply(connection, "HTTP/1.1 302 Found\r\nLocation: next?a=1\r\nContent-Length: 0\r\n\r\n")
             } else {
-                TestTLSServer.ok(c, self.json)
+                TestTLSServer.ok(connection, self.json)
             }
         }
         defer { server.stop() }
@@ -122,9 +136,7 @@ final class PinnedFetchTests: XCTestCase {
             "https://other.test/sub", "https://vpn.test:8443/sub", "http://vpn.test/sub",
             "https://u:p@vpn.test/sub", "https://sub.vpn.test/sub"
         ] {
-            let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in
-                TestTLSServer.reply(c, "HTTP/1.1 302 Found\r\nLocation: \(location)\r\nContent-Length: 0\r\n\r\n")
-            }
+            let server = try replyServer("HTTP/1.1 302 Found\r\nLocation: \(location)\r\nContent-Length: 0\r\n\r\n")
             defer { server.stop() }
             let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port)) }
             XCTAssertEqual(error, .invalid, location)
@@ -133,16 +145,16 @@ final class PinnedFetchTests: XCTestCase {
     }
     func testTooManyRedirectsAndLoopsAreRefused() async throws {
         let counter = LockedBox(0)
-        let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in
-            let n = counter.mutate { $0 += 1; return $0 }
-            TestTLSServer.reply(c, "HTTP/1.1 301 Moved\r\nLocation: /r\(n)\r\nContent-Length: 0\r\n\r\n")
+        let server = try TestTLSServer(identity: TestPKI.leafP12) { _, connection in
+            let hop = counter.mutate { $0 += 1; return $0 }
+            TestTLSServer.reply(connection, "HTTP/1.1 301 Moved\r\nLocation: /r\(hop)\r\nContent-Length: 0\r\n\r\n")
         }
         defer { server.stop() }
         let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port)) }
         XCTAssertEqual(error, .invalid)
         XCTAssertEqual(server.requests.count, 4)
-        let loop = try TestTLSServer(identity: TestPKI.leafP12) { _, c in
-            TestTLSServer.reply(c, "HTTP/1.1 302 Found\r\nLocation: /sub\r\nContent-Length: 0\r\n\r\n")
+        let loop = try TestTLSServer(identity: TestPKI.leafP12) { _, connection in
+            TestTLSServer.reply(connection, "HTTP/1.1 302 Found\r\nLocation: /sub\r\nContent-Length: 0\r\n\r\n")
         }
         defer { loop.stop() }
         let again = await failure { try await fetch("https://vpn.test/sub", trust(loop.port)) }
@@ -164,19 +176,22 @@ final class PinnedFetchTests: XCTestCase {
 
     func testReplyFraming() async throws {
         let body = json
-        let chunked = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n5;ext=1\r\n{\"ver\r\n\(body.count - 5)\r\nsion\":1}\r\n0\r\nTrailer: x\r\n\r\n"
+        let chunked = okHead + "Transfer-Encoding: chunked\r\n\r\n"
+            + "5;ext=1\r\n{\"ver\r\n\(body.count - 5)\r\nsion\":1}\r\n0\r\nTrailer: x\r\n\r\n"
+        let interim = "HTTP/1.1 100 Continue\r\n\r\n" + okHead
+            + "content-length: \(body.count)\r\n\r\n\(body)"
         let rows: [(String, String)] = [
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\n\r\n\(body)", "length"),
+            (okHead + "Content-Length: \(body.count)\r\n\r\n\(body)", "length"),
             ("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n\(body)", "until closed"),
             (chunked, "chunked"),
-            ("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: application/json\r\ncontent-length: \(body.count)\r\n\r\n\(body)", "interim"),
+            (interim, "interim"),
             ("HTTP/1.1 200\nContent-Type: application/json\nContent-Length: \(body.count)\n\n\(body)", "bare LF")
         ]
         for row in rows {
-            let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.reply(c, row.0) }
+            let server = try replyServer(row.0)
             defer { server.stop() }
             let got = try await fetch("https://vpn.test/sub", trust(server.port))
-            XCTAssertEqual(String(decoding: got, as: UTF8.self), body, row.1)
+            XCTAssertEqual(String(bytes: got, encoding: .utf8), body, row.1)
         }
     }
     func testStatusesAndMalformedReplies() async throws {
@@ -186,15 +201,15 @@ final class PinnedFetchTests: XCTestCase {
             ("HTTP/1.1 503 Busy\r\n\r\n", .http(503)),
             ("HTTP/1.1 302 Found\r\n\r\n", .http(302)),
             ("garbage\r\n\r\n", .invalid),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n Folded: x\r\n\r\n", .invalid),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\nab", .invalid),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: +2\r\n\r\nab", .invalid),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n", .invalid),
+            (okHead + " Folded: x\r\n\r\n", .invalid),
+            (okHead + "Content-Length: 2\r\nContent-Length: 3\r\n\r\nab", .invalid),
+            (okHead + "Content-Length: +2\r\n\r\nab", .invalid),
+            (okHead + "Transfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n", .invalid),
             ("HTTP/1.1 101 Switching\r\n\r\n", .invalid),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 10\r\n\r\nab", .network)
+            (okHead + "Content-Length: 10\r\n\r\nab", .network)
         ]
         for row in rows {
-            let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.reply(c, row.0) }
+            let server = try replyServer(row.0)
             defer { server.stop() }
             let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port)) }
             XCTAssertEqual(error, row.1, row.0.debugDescription)
@@ -204,34 +219,37 @@ final class PinnedFetchTests: XCTestCase {
         let cap = Subscription.maximumBytes
         let exact = String(repeating: "a", count: cap)
         let over = String(repeating: "a", count: cap + 1)
-        let chunk = { (s: String) in "\(String(s.count, radix: 16))\r\n\(s)\r\n0\r\n\r\n" }
+        let chunk = { (text: String) in "\(String(text.count, radix: 16))\r\n\(text)\r\n0\r\n\r\n" }
+        let chunkedHead = okHead + "Transfer-Encoding: chunked\r\n\r\n"
         let rows: [(String, SubscriptionFetchError?)] = [
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(cap)\r\n\r\n\(exact)", nil),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(cap + 1)\r\n\r\n\(over)", .tooLarge),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 99999999999999999999\r\n\r\n", .tooLarge),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\(exact)", nil),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\(over)", .tooLarge),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n\(chunk(exact))", nil),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n\(chunk(over))", .tooLarge),
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFF\r\n", .tooLarge)
+            (okHead + "Content-Length: \(cap)\r\n\r\n\(exact)", nil),
+            (okHead + "Content-Length: \(cap + 1)\r\n\r\n\(over)", .tooLarge),
+            (okHead + "Content-Length: 99999999999999999999\r\n\r\n", .tooLarge),
+            (okHead + "\r\n\(exact)", nil),
+            (okHead + "\r\n\(over)", .tooLarge),
+            (chunkedHead + chunk(exact), nil),
+            (chunkedHead + chunk(over), .tooLarge),
+            (chunkedHead + "FFFFFFFFFF\r\n", .tooLarge)
         ]
         for row in rows {
-            let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.reply(c, row.0) }
+            let server = try replyServer(row.0)
             defer { server.stop() }
             let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port)) }
             XCTAssertEqual(error, row.1, String(row.0.prefix(70)).debugDescription)
         }
     }
+}
 
+extension PinnedFetchTests {
     // MARK: the deadline
 
     func testASlowDripEndsAtTheDeadline() async throws {
-        let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in
-            TestTLSServer.send(c, Data("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n".utf8))
+        let server = try TestTLSServer(identity: TestPKI.leafP12) { _, connection in
+            TestTLSServer.send(connection, Data((self.okHead + "Content-Length: 1000\r\n\r\n").utf8))
             DispatchQueue.global().async {
                 for _ in 0..<100 {
                     Thread.sleep(forTimeInterval: 0.1)
-                    TestTLSServer.send(c, Data("x".utf8))
+                    TestTLSServer.send(connection, Data("x".utf8))
                 }
             }
         }
@@ -250,9 +268,10 @@ final class PinnedFetchTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(start), 4)
     }
     func testTheDeadlineCoversRedirects() async throws {
-        let server = try TestTLSServer(identity: TestPKI.leafP12) { head, c in
+        let server = try TestTLSServer(identity: TestPKI.leafP12) { head, connection in
             Thread.sleep(forTimeInterval: 0.6)
-            TestTLSServer.reply(c, "HTTP/1.1 302 Found\r\nLocation: /n\(head.count)\r\nContent-Length: 0\r\n\r\n")
+            let target = "/n\(head.count)"
+            TestTLSServer.reply(connection, "HTTP/1.1 302 Found\r\nLocation: \(target)\r\nContent-Length: 0\r\n\r\n")
         }
         defer { server.stop() }
         let error = await failure { try await fetch("https://vpn.test/sub", trust(server.port), timeout: 1.5) }

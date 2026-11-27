@@ -58,10 +58,10 @@ final class SubscriptionURLTests: XCTestCase {
         XCTAssertEqual(plain?.effectivePort, 443)
         XCTAssertEqual(plain?.requestTarget, "/")
         XCTAssertEqual(SubscriptionURL.parse("https://example.org:/")?.port, nil)
-        let v6 = SubscriptionURL.parse("https://[2001:DB8:0::1]:444/s")
-        XCTAssertEqual(v6?.host, "2001:db8::1")
-        XCTAssertEqual(v6?.authority, "[2001:db8::1]:444")
-        XCTAssertEqual(v6?.isIPv6, true)
+        let ipv6 = SubscriptionURL.parse("https://[2001:DB8:0::1]:444/s")
+        XCTAssertEqual(ipv6?.host, "2001:db8::1")
+        XCTAssertEqual(ipv6?.authority, "[2001:db8::1]:444")
+        XCTAssertEqual(ipv6?.isIPv6, true)
     }
     func testPathAndQueryAreSentEncodedAndKeptEscaped() {
         let url = SubscriptionURL.parse("https://example.org/a%2Fb/\u{e9}?key=a%2Bb&q=\"x\"")

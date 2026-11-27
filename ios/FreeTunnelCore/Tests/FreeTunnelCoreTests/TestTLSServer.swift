@@ -26,11 +26,12 @@ final class TestTLSServer {
         let status = SecPKCS12Import(Data(base64Encoded: p12)! as CFData, options as CFDictionary, &items)
         guard status == errSecSuccess,
             let item = (items as? [[String: Any]])?.first,
-            let identity = item[kSecImportItemIdentity as String]
+            let value = item[kSecImportItemIdentity as String] as AnyObject?,
+            CFGetTypeID(value) == SecIdentityGetTypeID()
         else { throw NSError(domain: "TestTLSServer", code: Int(status)) }
         let tls = NWProtocolTLS.Options()
         sec_protocol_options_set_local_identity(
-            tls.securityProtocolOptions, sec_identity_create(identity as! SecIdentity)!)
+            tls.securityProtocolOptions, sec_identity_create(unsafeDowncast(value, to: SecIdentity.self))!)
         listener = try NWListener(using: NWParameters(tls: tls, tcp: NWProtocolTCP.Options()), on: .any)
         let ready = DispatchSemaphore(value: 0)
         listener.stateUpdateHandler = { state in
@@ -54,7 +55,8 @@ final class TestTLSServer {
             connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [self] data, _, done, error in
                 if let data { head.append(data) }
                 if let range = head.range(of: Data("\r\n\r\n".utf8)) {
-                    let text = String(decoding: head[..<range.lowerBound], as: UTF8.self)
+                    // The requests of these tests are ASCII.
+                    let text = String(bytes: head[..<range.lowerBound], encoding: .utf8) ?? ""
                     lock.lock()
                     heads.append(text)
                     lock.unlock()
@@ -87,7 +89,8 @@ final class TestTLSServer {
             })
     }
     static func ok(_ connection: NWConnection, _ body: String) {
-        reply(connection, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\n\r\n\(body)")
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        reply(connection, head + "Content-Length: \(body.utf8.count)\r\n\r\n\(body)")
     }
     /// Sends the bytes and keeps the connection open.
     static func send(_ connection: NWConnection, _ data: Data) {

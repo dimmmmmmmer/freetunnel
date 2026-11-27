@@ -7,6 +7,9 @@ final class SubscriptionRequestTests: XCTestCase {
         -> SubscriptionTrust {
         SubscriptionTrust(hostname: host, addresses: addresses, certificate: certificate)
     }
+    func request(addresses: String, certificate: String) -> SubscriptionRequest {
+        SubscriptionRequest.make("https://vpn.test/sub", trust: trust("vpn.test", addresses, certificate))
+    }
     func testAPinnedRequestNeedsTheConfigsHostnameAndACertificate() {
         let url = "https://alice:s3cret@vpn.test/sub"
         let request = SubscriptionRequest.make(url, trust: trust("VPN.Test", "127.0.0.1:8443, 10.0.0.1:443"))
@@ -32,7 +35,8 @@ final class SubscriptionRequestTests: XCTestCase {
         // An IDN and an IPv6 literal are the same host whichever form either side writes.
         let idn = "\u{43f}\u{440}\u{438}\u{43c}\u{435}\u{440}.test"
         XCTAssertTrue(SubscriptionRequest.make("https://xn--e1afmkfd.test/s", trust: trust(idn, "")).pinned)
-        XCTAssertTrue(SubscriptionRequest.make("https://\(idn.uppercased())/s", trust: trust("xn--e1afmkfd.test", "")).pinned)
+        let upperIDN = "https://\(idn.uppercased())/s"
+        XCTAssertTrue(SubscriptionRequest.make(upperIDN, trust: trust("xn--e1afmkfd.test", "")).pinned)
         XCTAssertTrue(SubscriptionRequest.make("https://[2001:db8::1]/s", trust: trust("2001:db8::1", "")).pinned)
         XCTAssertTrue(SubscriptionRequest.make("https://[2001:DB8:0::1]/s", trust: trust("2001:db8::1", "")).pinned)
         XCTAssertFalse(SubscriptionRequest.make("https://[2001:db8::2]/s", trust: trust("2001:db8::1", "")).pinned)
@@ -41,21 +45,31 @@ final class SubscriptionRequestTests: XCTestCase {
         XCTAssertFalse(SubscriptionRequest.make("", trust: trust("vpn.test", "")).pinned)
     }
     func testAPinnedRequestConnectsToTheFirstAddress() {
-        let rows: [(String, String?, Int?)] = [
-            ("1.2.3.4:443, 5.6.7.8:443", "1.2.3.4", 443),
-            ("[2001:db8::1]:8443", "2001:db8::1", 8443),
-            (" vpn.example.com:9443 ", "vpn.example.com", 9443),
-            ("1.2.3.4", nil, nil), ("", nil, nil), ("1.2.3.4:0", nil, nil),
-            ("1.2.3.4:65536", nil, nil), ("[]:443", nil, nil), ("2001:db8::1:443", nil, nil),
-            ("a/b:443", nil, nil), ("1.2.3.4:+443", nil, nil),
-            ("nonsense, 5.6.7.8:443", nil, nil)
+        struct Row {
+            let text: String
+            let host: String?
+            let port: Int?
+            init(_ text: String, _ host: String?, _ port: Int?) {
+                self.text = text
+                self.host = host
+                self.port = port
+            }
+        }
+        let rows = [
+            Row("1.2.3.4:443, 5.6.7.8:443", "1.2.3.4", 443),
+            Row("[2001:db8::1]:8443", "2001:db8::1", 8443),
+            Row(" vpn.example.com:9443 ", "vpn.example.com", 9443),
+            Row("1.2.3.4", nil, nil), Row("", nil, nil), Row("1.2.3.4:0", nil, nil),
+            Row("1.2.3.4:65536", nil, nil), Row("[]:443", nil, nil), Row("2001:db8::1:443", nil, nil),
+            Row("a/b:443", nil, nil), Row("1.2.3.4:+443", nil, nil),
+            Row("nonsense, 5.6.7.8:443", nil, nil)
         ]
         for row in rows {
             let request = SubscriptionRequest.make(
-                "https://alice:s3cret@vpn.test:1111/sub", trust: trust("vpn.test", row.0))
-            XCTAssertTrue(request.pinned, row.0)
-            XCTAssertEqual(request.connectHost, row.1, row.0)
-            XCTAssertEqual(request.connectPort, row.2, row.0)
+                "https://alice:s3cret@vpn.test:1111/sub", trust: trust("vpn.test", row.text))
+            XCTAssertTrue(request.pinned, row.text)
+            XCTAssertEqual(request.connectHost, row.host, row.text)
+            XCTAssertEqual(request.connectPort, row.port, row.text)
         }
     }
     func testCertificatesThatCannotBeReadArePinnedWithNoPins() {
@@ -66,14 +80,12 @@ final class SubscriptionRequestTests: XCTestCase {
         let garbage = pem([0, 0, 0])
         let shaped = pem([0x30, 0x0b, 0x30, 0x02, 0x05, 0x00, 0x30, 0x02, 0x05, 0x00, 0x03, 0x01, 0x00])
         for text in [garbage, shaped, garbage + shaped, "-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----"] {
-            let request = SubscriptionRequest.make("https://vpn.test/sub", trust: trust("vpn.test", "127.0.0.1:8443", text))
+            let request = self.request(addresses: "127.0.0.1:8443", certificate: text)
             XCTAssertTrue(request.pinned)
             XCTAssertTrue(request.pins.isEmpty)
         }
-        XCTAssertEqual(
-            SubscriptionRequest.make("https://vpn.test/sub", trust: trust("vpn.test", "", shaped + TestPKI.leafPEM)).pins.count, 1)
-        XCTAssertEqual(
-            SubscriptionRequest.make("https://vpn.test/sub", trust: trust("vpn.test", "", TestPKI.leafPEM + TestPKI.caPEM)).pins.count, 2)
+        XCTAssertEqual(request(addresses: "", certificate: shaped + TestPKI.leafPEM).pins.count, 1)
+        XCTAssertEqual(request(addresses: "", certificate: TestPKI.leafPEM + TestPKI.caPEM).pins.count, 2)
     }
     func testTrustComesFromAConfiguration() throws {
         let toml = """
@@ -138,6 +150,8 @@ final class ImportTrustTests: XCTestCase {
         XCTAssertEqual(document.trust?.addresses, "127.0.0.1:8443")
         XCTAssertTrue(SubscriptionRequest.make("https://vpn.test/sub", trust: document.trust).pinned)
         // Without a subscription there is nothing to trust it with.
-        XCTAssertNil(try ImportDocument.parse(toml.replacingOccurrences(of: "subscription_url = \"https://vpn.test/sub\"\n", with: "")).trust)
+        let line = "subscription_url = \"https://vpn.test/sub\"\n"
+        let without = try ImportDocument.parse(toml.replacingOccurrences(of: line, with: ""))
+        XCTAssertNil(without.trust)
     }
 }
