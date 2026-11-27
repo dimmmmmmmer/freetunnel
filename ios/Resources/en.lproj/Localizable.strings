@@ -253,3 +253,7 @@
 /* Subscription fetch (pinned to the config's certificate, as on desktop and Android) */
 "subscriptionUntrusted" = "Certificate not trusted; ask your provider for a new link";
 "subscriptionBadPin" = "The config's certificate can't be read; ask your provider for a new link";
+
+/* Subscription fetch statuses, as on desktop */
+"subscriptionDenied" = "Access denied; import a new link from your provider";
+"subscriptionNoUpdates" = "This server doesn't offer updates now";

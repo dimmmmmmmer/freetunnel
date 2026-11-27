@@ -236,21 +236,39 @@ public struct SubscriptionURL: Equatable {
     /// A host as it names a server, as the desktop's `hostKey`: in ACE form and in lower
     /// case, so that however each side writes it they compare equal. An IP address is
     /// written in its canonical form; brackets around an IPv6 one are not part of it.
-    public static func hostKey(_ host: String) -> String {
+    public static func hostKey(_ host: String) -> String { ace(host) ?? "" }
+
+    /// `hostKey`, or nil for a name that has no ACE form (a label over 63 bytes, a name over
+    /// 253, a label punycode cannot encode): such a name is never equal to any host.
+    public static func ace(_ host: String) -> String? {
         var name = host
         if name.hasPrefix("[") && name.hasSuffix("]") && name.count >= 2 {
             name = String(name.dropFirst().dropLast())
         }
+        guard name.utf8.count <= 253 else { return nil }
         if let v6 = canonicalIPv6(name) { return v6 }
         let separators: Set<Character> = [".", "\u{3002}", "\u{FF0E}", "\u{FF61}"]
         let labels = name.split(omittingEmptySubsequences: false, whereSeparator: { separators.contains($0) })
-        return labels.map { label -> String in
+        var out: [String] = []
+        for label in labels {
             let text = String(label)
-            if text.unicodeScalars.allSatisfy({ $0.isASCII }) { return text.lowercased() }
+            guard text.utf8.count <= 63 else { return nil }
+            if text.unicodeScalars.allSatisfy({ $0.isASCII }) {
+                out.append(text.lowercased())
+                continue
+            }
             let mapped = text.precomposedStringWithCompatibilityMapping.lowercased()
-            if mapped.unicodeScalars.allSatisfy({ $0.isASCII }) { return mapped }
-            return "xn--" + (punycode(mapped.unicodeScalars.map { $0.value }) ?? "")
-        }.joined(separator: ".")
+            if mapped.unicodeScalars.allSatisfy({ $0.isASCII }) {
+                out.append(mapped)
+            } else {
+                guard mapped.utf8.count <= 63,
+                    let encoded = punycode(mapped.unicodeScalars.map { $0.value }),
+                    encoded.utf8.count + 4 <= 63
+                else { return nil }
+                out.append("xn--" + encoded)
+            }
+        }
+        return out.joined(separator: ".")
     }
 
     static func canonicalIPv6(_ text: String) -> String? {
@@ -268,9 +286,10 @@ public struct SubscriptionURL: Equatable {
         return canonicalIPv6(text) != nil || inet_pton(AF_INET, text, &v4) == 1
     }
 
-    // RFC 3492.
+    // RFC 3492, with every step of the arithmetic checked: nil on overflow.
     static func punycode(_ input: [UInt32]) -> String? {
         let base: UInt32 = 36, tMin: UInt32 = 1, tMax: UInt32 = 26, skew: UInt32 = 38, damp: UInt32 = 700
+        guard input.allSatisfy({ $0 <= 0x10FFFF }) else { return nil }
         var n: UInt32 = 128, delta: UInt32 = 0, bias: UInt32 = 72
         var output = input.filter { $0 < 128 }.map { Character(Unicode.Scalar($0)!) }
         let basic = UInt32(output.count)
@@ -297,7 +316,11 @@ public struct SubscriptionURL: Equatable {
             delta = sum
             n = m
             for c in input {
-                if c < n { delta += 1 }
+                if c < n {
+                    let (next, over) = delta.addingReportingOverflow(1)
+                    if over { return nil }
+                    delta = next
+                }
                 if c == n {
                     var q = delta
                     var k = base
@@ -314,7 +337,9 @@ public struct SubscriptionURL: Equatable {
                     handled += 1
                 }
             }
-            delta += 1
+            let (next, over) = delta.addingReportingOverflow(1)
+            if over || n == UInt32.max { return nil }
+            delta = next
             n += 1
         }
         return String(output)

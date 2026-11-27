@@ -42,13 +42,19 @@ public enum SubscriptionFetcher {
     /// The deadline: what runs at the end of the time is told, once.
     final class Deadline: @unchecked Sendable {
         private let lock = NSLock()
-        private(set) var expired = false
+        private var isExpired = false
         private var done = false
         private var onExpire: [() -> Void] = []
-        lazy var expire: DispatchWorkItem = DispatchWorkItem { [self] in
+        private(set) var expire: DispatchWorkItem!
+        init() {
+            // Weak: the work item sits in a queue until its time, or until finish().
+            expire = DispatchWorkItem { [weak self] in self?.fire() }
+        }
+        var expired: Bool { lock.lock(); defer { lock.unlock() }; return isExpired }
+        private func fire() {
             lock.lock()
             if done { lock.unlock(); return }
-            expired = true
+            isExpired = true
             let actions = onExpire
             onExpire = []
             lock.unlock()
@@ -63,8 +69,8 @@ public enum SubscriptionFetcher {
         }
         func whenExpired(_ action: @escaping () -> Void) {
             lock.lock()
-            if expired { lock.unlock(); action(); return }
-            onExpire.append(action)
+            if isExpired { lock.unlock(); action(); return }
+            if !done { onExpire.append(action) }
             lock.unlock()
         }
     }
@@ -125,7 +131,14 @@ public enum SubscriptionFetcher {
         _ url: SubscriptionURL, authorization: String?, request: SubscriptionRequest, state: Deadline
     ) async throws -> HTTPReply {
         let verdict = PinnedHTTPS.Verdict()
-        let host = request.connectHost ?? url.host
+        var host = request.connectHost ?? url.host
+        // No SNI names an IP number: when the TLS name is one and the connection goes to a
+        // host name, connect to the number it resolves to, so that the name is not sent.
+        if SubscriptionURL.isIPLiteral(SubscriptionURL.hostKey(request.verifyName)),
+            !SubscriptionURL.isIPLiteral(SubscriptionURL.hostKey(host))
+        {
+            host = try await PinnedHTTPS.resolve(host, deadline: state)
+        }
         let port = request.connectPort ?? url.effectivePort
         let wire = PinnedHTTPS.open(
             host: host, port: port, verifyName: request.verifyName, pins: request.pins, verdict: verdict)

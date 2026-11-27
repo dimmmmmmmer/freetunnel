@@ -117,6 +117,12 @@ final class HTTPResponseReader {
         guard status == 200 else {
             return HTTPReply(status: status, location: fields.first { $0.0 == "location" }?.1, body: nil)
         }
+        // As the desktop's `isJson`: the media type before any parameter, in any case.
+        let types = fields.filter { $0.0 == "content-type" }.map { $0.1 }
+        guard types.count == 1,
+            types[0].split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                .trimmingCharacters(in: .whitespaces).lowercased() == "application/json"
+        else { throw SubscriptionFetchError.invalid }
         return HTTPReply(status: status, location: nil, body: try await body(fields))
     }
 

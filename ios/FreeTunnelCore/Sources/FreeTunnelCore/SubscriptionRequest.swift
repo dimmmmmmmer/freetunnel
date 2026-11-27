@@ -54,9 +54,9 @@ public struct SubscriptionRequest: Equatable {
             source: source, pinned: false, pins: [], verifyName: "", connectHost: nil,
             connectPort: nil)
         guard let trust, !trust.certificate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            let url = SubscriptionURL.parse(source),
-            SubscriptionURL.hostKey(url.host) == SubscriptionURL.hostKey(trust.hostname),
-            !trust.hostname.isEmpty
+            let url = SubscriptionURL.parse(source), !trust.hostname.isEmpty,
+            let urlHost = SubscriptionURL.ace(url.host), let configHost = SubscriptionURL.ace(trust.hostname),
+            !urlHost.isEmpty, urlHost == configHost
         else { return plain }
         var request = plain
         request.pinned = true

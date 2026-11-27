@@ -164,13 +164,13 @@ final class PinnedFetchTests: XCTestCase {
 
     func testReplyFraming() async throws {
         let body = json
-        let chunked = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5;ext=1\r\n{\"ver\r\n\(body.count - 5)\r\nsion\":1}\r\n0\r\nTrailer: x\r\n\r\n"
+        let chunked = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n5;ext=1\r\n{\"ver\r\n\(body.count - 5)\r\nsion\":1}\r\n0\r\nTrailer: x\r\n\r\n"
         let rows: [(String, String)] = [
-            ("HTTP/1.1 200 OK\r\nContent-Length: \(body.count)\r\n\r\n\(body)", "length"),
-            ("HTTP/1.0 200 OK\r\n\r\n\(body)", "until closed"),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\n\r\n\(body)", "length"),
+            ("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n\(body)", "until closed"),
             (chunked, "chunked"),
-            ("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\ncontent-length: \(body.count)\r\n\r\n\(body)", "interim"),
-            ("HTTP/1.1 200\nContent-Length: \(body.count)\n\n\(body)", "bare LF")
+            ("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: application/json\r\ncontent-length: \(body.count)\r\n\r\n\(body)", "interim"),
+            ("HTTP/1.1 200\nContent-Type: application/json\nContent-Length: \(body.count)\n\n\(body)", "bare LF")
         ]
         for row in rows {
             let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.reply(c, row.0) }
@@ -186,12 +186,12 @@ final class PinnedFetchTests: XCTestCase {
             ("HTTP/1.1 503 Busy\r\n\r\n", .http(503)),
             ("HTTP/1.1 302 Found\r\n\r\n", .http(302)),
             ("garbage\r\n\r\n", .invalid),
-            ("HTTP/1.1 200 OK\r\n Folded: x\r\n\r\n", .invalid),
-            ("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\nab", .invalid),
-            ("HTTP/1.1 200 OK\r\nContent-Length: +2\r\n\r\nab", .invalid),
-            ("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n", .invalid),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n Folded: x\r\n\r\n", .invalid),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\nab", .invalid),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: +2\r\n\r\nab", .invalid),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n", .invalid),
             ("HTTP/1.1 101 Switching\r\n\r\n", .invalid),
-            ("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nab", .network)
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 10\r\n\r\nab", .network)
         ]
         for row in rows {
             let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.reply(c, row.0) }
@@ -206,14 +206,14 @@ final class PinnedFetchTests: XCTestCase {
         let over = String(repeating: "a", count: cap + 1)
         let chunk = { (s: String) in "\(String(s.count, radix: 16))\r\n\(s)\r\n0\r\n\r\n" }
         let rows: [(String, SubscriptionFetchError?)] = [
-            ("HTTP/1.1 200 OK\r\nContent-Length: \(cap)\r\n\r\n\(exact)", nil),
-            ("HTTP/1.1 200 OK\r\nContent-Length: \(cap + 1)\r\n\r\n\(over)", .tooLarge),
-            ("HTTP/1.1 200 OK\r\nContent-Length: 99999999999999999999\r\n\r\n", .tooLarge),
-            ("HTTP/1.1 200 OK\r\n\r\n\(exact)", nil),
-            ("HTTP/1.1 200 OK\r\n\r\n\(over)", .tooLarge),
-            ("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n\(chunk(exact))", nil),
-            ("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n\(chunk(over))", .tooLarge),
-            ("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFF\r\n", .tooLarge)
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(cap)\r\n\r\n\(exact)", nil),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(cap + 1)\r\n\r\n\(over)", .tooLarge),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 99999999999999999999\r\n\r\n", .tooLarge),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\(exact)", nil),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\(over)", .tooLarge),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n\(chunk(exact))", nil),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n\(chunk(over))", .tooLarge),
+            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFF\r\n", .tooLarge)
         ]
         for row in rows {
             let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in TestTLSServer.reply(c, row.0) }
@@ -227,7 +227,7 @@ final class PinnedFetchTests: XCTestCase {
 
     func testASlowDripEndsAtTheDeadline() async throws {
         let server = try TestTLSServer(identity: TestPKI.leafP12) { _, c in
-            TestTLSServer.send(c, Data("HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n".utf8))
+            TestTLSServer.send(c, Data("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n".utf8))
             DispatchQueue.global().async {
                 for _ in 0..<100 {
                     Thread.sleep(forTimeInterval: 0.1)

@@ -138,6 +138,10 @@ enum PinnedHTTPS {
         if !SubscriptionURL.isIPLiteral(name) { sec_protocol_options_set_tls_server_name(options, name) }
         sec_protocol_options_set_min_tls_protocol_version(options, .TLSv12)
         sec_protocol_options_add_tls_application_protocol(options, "http/1.1")
+        // A fresh handshake for every fetch, so the verify block runs each time, as the
+        // desktop's one-off network manager does.
+        sec_protocol_options_set_tls_resumption_enabled(options, false)
+        sec_protocol_options_set_tls_tickets_enabled(options, false)
         sec_protocol_options_set_verify_block(
             options,
             { _, trust, complete in
@@ -169,5 +173,50 @@ enum PinnedHTTPS {
         if let authorization { text += "Authorization: \(authorization)\r\n" }
         text += "\r\n"
         return Data(text.utf8)
+    }
+
+    /// Looks `host` up, IPv4 first, and fails with `.timeout` the moment the deadline is
+    /// up (a lookup cannot be interrupted; it is abandoned). Used when the TLS name is an IP
+    /// number and the connection goes to a host name: Network.framework would send that
+    /// host name as the SNI, which Qt never does, so the connection goes to the number.
+    static func resolve(_ host: String, deadline: SubscriptionFetcher.Deadline) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            let lock = NSLock()
+            var done = false
+            func finish(_ result: Result<String, Error>) {
+                lock.lock()
+                let first = !done
+                done = true
+                lock.unlock()
+                if first { continuation.resume(with: result) }
+            }
+            deadline.whenExpired { finish(.failure(SubscriptionFetchError.timeout)) }
+            DispatchQueue.global().async {
+                var hints = addrinfo()
+                hints.ai_socktype = SOCK_STREAM
+                var found: UnsafeMutablePointer<addrinfo>?
+                guard getaddrinfo(host, nil, &hints, &found) == 0, let head = found else {
+                    finish(.failure(SubscriptionFetchError.network))
+                    return
+                }
+                defer { freeaddrinfo(head) }
+                var v4: String?, v6: String?
+                var entry: UnsafeMutablePointer<addrinfo>? = head
+                while let current = entry {
+                    var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    if getnameinfo(
+                        current.pointee.ai_addr, current.pointee.ai_addrlen, &buffer, socklen_t(buffer.count),
+                        nil, 0, NI_NUMERICHOST) == 0
+                    {
+                        let text = String(cString: buffer)
+                        if current.pointee.ai_family == AF_INET { v4 = v4 ?? text }
+                        else if current.pointee.ai_family == AF_INET6, !text.contains("%") { v6 = v6 ?? text }
+                    }
+                    entry = current.pointee.ai_next
+                }
+                if let address = v4 ?? v6 { finish(.success(address)) }
+                else { finish(.failure(SubscriptionFetchError.network)) }
+            }
+        }
     }
 }

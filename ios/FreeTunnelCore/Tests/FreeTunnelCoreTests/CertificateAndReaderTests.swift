@@ -72,10 +72,10 @@ final class CertificateAndReaderTests: XCTestCase {
         try await HTTPResponseReader(Feed(text, split: split)).read()
     }
     func testReaderHandlesByteAtATimeInput() async throws {
-        let text = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2;x=y\r\nde\r\n0\r\n\r\n"
+        let text = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2;x=y\r\nde\r\n0\r\n\r\n"
         let reply = try await read(text, split: true)
         XCTAssertEqual(reply.body, Data("abcde".utf8))
-        let length = try await read("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabcEXTRA", split: true)
+        let length = try await read("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 3\r\n\r\nabcEXTRA", split: true)
         XCTAssertEqual(length.body, Data("abc".utf8))
     }
     func testReaderStatusLine() {
@@ -88,12 +88,12 @@ final class CertificateAndReaderTests: XCTestCase {
     }
     func testReaderRefusesAnOverlongHeadOrLine() async throws {
         do {
-            _ = try await read("HTTP/1.1 200 OK\r\n" + String(repeating: "a", count: 9000) + ": x\r\n\r\n")
+            _ = try await read("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" + String(repeating: "a", count: 9000) + ": x\r\n\r\n")
             XCTFail("read")
         } catch { XCTAssertEqual(error as? SubscriptionFetchError, .invalid) }
         do {
             let many = (0..<2000).map { "h\($0): value\r\n" }.joined()
-            _ = try await read("HTTP/1.1 200 OK\r\n" + many + "\r\n")
+            _ = try await read("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" + many + "\r\n")
             XCTFail("read")
         } catch { XCTAssertEqual(error as? SubscriptionFetchError, .invalid) }
     }

@@ -24,6 +24,10 @@ public enum SubscriptionFetchError: Error, Equatable {
         case .badPin: return .subscriptionBadPin
         case .untrusted: return .subscriptionUntrusted
         case .tooLarge: return .tooLarge
+        // As the desktop: a 401 is a link that no longer works, and a 403, 404, 405 or 407 a
+        // server with no subscription here; nothing a retry would change.
+        case .http(401): return .subscriptionDenied
+        case .http(403), .http(404), .http(405), .http(407): return .subscriptionNoUpdates
         case .timeout, .network, .http, .invalid: return .networkFailed
         }
     }
