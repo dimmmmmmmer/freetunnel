@@ -115,6 +115,8 @@ struct QRCodeDialog: View {
     @State private var code: QRCode.Result?
     @State private var captured = false
     @State private var idleTimerWasDisabled = false
+    // Held here: a publisher made in `body` would be a new one for every evaluation.
+    @State private var tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private var profile: Profile? { state.preferences.profiles.first { $0.id == id } }
     private var hidden: Bool { captured || phase != .active }
     private func close() { state.dialog = nil }
@@ -150,7 +152,7 @@ struct QRCodeDialog: View {
         .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) {
             _ in captured = ScreenCapture.active
         }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+        .onReceive(tick) { _ in
             captured = ScreenCapture.active
         }
     }
