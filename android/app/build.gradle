@@ -73,6 +73,13 @@ android {
         buildConfigField 'String', 'CORE_VERSION', '\"' + coreVersion + '\"'
     }
     buildFeatures { buildConfig true }
+    // TestTls (certificates made while a test runs, and a TLS server) is used by the unit tests on the JVM and by the
+    // device tests on Android's own TLS stack, and is kept once, in src/sharedTest. It uses BouncyCastle, which the app
+    // already has, and java.* / javax.net, which both have.
+    sourceSets {
+        test.java.srcDir 'src/sharedTest/java'
+        androidTest.java.srcDir 'src/sharedTest/java'
+    }
     // Release builds are unsigned. scripts/sign-android-release.sh signs them
     // with Build Tools alone, so Gradle and its plugins never see the keystore.
     buildTypes {
