@@ -18,8 +18,41 @@ enum QRCode {
         let modules: Int
     }
 
-    // nil when the text does not fit a QR code at correction level L.
-    static func make(_ text: String) -> Result? {
+    // The code as grey pixels, row 0 at the top.
+    private struct GreyBitmap {
+        let width: Int
+        let height: Int
+        let pixels: [UInt8]
+
+        func isDark(_ column: Int, _ row: Int) -> Bool { pixels[row * width + column] < 128 }
+
+        // The box round the dark pixels, whatever margin the filter adds; nil when there are none
+        // or the box is not square.
+        func darkBounds() -> Bounds? {
+            var bounds = Bounds(minX: width, minY: height, maxX: -1, maxY: -1)
+            for row in 0..<height {
+                for column in 0..<width where isDark(column, row) {
+                    bounds.minX = min(bounds.minX, column)
+                    bounds.maxX = max(bounds.maxX, column)
+                    bounds.minY = min(bounds.minY, row)
+                    bounds.maxY = max(bounds.maxY, row)
+                }
+            }
+            guard bounds.maxX >= bounds.minX, bounds.maxY >= bounds.minY,
+                bounds.maxX - bounds.minX == bounds.maxY - bounds.minY
+            else { return nil }
+            return bounds
+        }
+    }
+
+    private struct Bounds {
+        var minX: Int
+        var minY: Int
+        var maxX: Int
+        var maxY: Int
+    }
+
+    private static func greyBitmap(_ text: String) -> GreyBitmap? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(text.utf8)
         filter.correctionLevel = "L"
@@ -30,7 +63,7 @@ enum QRCode {
         guard width > 0, width == height,
             let rendered = CIContext().createCGImage(output, from: extent)
         else { return nil }
-        // Read the code back as grey pixels (row 0 at the top), whatever margin the filter adds.
+        // Read the code back as grey pixels (row 0 at the top).
         var pixels = [UInt8](repeating: 255, count: width * height)
         let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
             guard
@@ -44,25 +77,17 @@ enum QRCode {
             return true
         }
         guard drawn else { return nil }
-        func dark(_ x: Int, _ y: Int) -> Bool { pixels[y * width + x] < 128 }
-        var minX = width
-        var minY = height
-        var maxX = -1
-        var maxY = -1
-        for y in 0..<height {
-            for x in 0..<width where dark(x, y) {
-                minX = min(minX, x)
-                maxX = max(maxX, x)
-                minY = min(minY, y)
-                maxY = max(maxY, y)
-            }
-        }
-        guard maxX >= minX, maxY >= minY, maxX - minX == maxY - minY else { return nil }
+        return GreyBitmap(width: width, height: height, pixels: pixels)
+    }
+
+    // nil when the text does not fit a QR code at correction level L.
+    static func make(_ text: String) -> Result? {
+        guard let bitmap = greyBitmap(text), let bounds = bitmap.darkBounds() else { return nil }
         // The finder pattern's top edge is seven modules wide: that gives the module's pixels.
         var run = 0
-        while minX + run <= maxX && dark(minX + run, minY) { run += 1 }
+        while bounds.minX + run <= bounds.maxX && bitmap.isDark(bounds.minX + run, bounds.minY) { run += 1 }
         let module = max(1, run / 7)
-        let count = (maxX - minX + 1) / module
+        let count = (bounds.maxX - bounds.minX + 1) / module
         guard count >= 21 else { return nil }
         let side = count + 2 * quiet
         let format = UIGraphicsImageRendererFormat()
@@ -76,7 +101,8 @@ enum QRCode {
             UIColor.black.setFill()
             for row in 0..<count {
                 for column in 0..<count
-                where dark(minX + column * module + module / 2, minY + row * module + module / 2) {
+                where bitmap.isDark(
+                    bounds.minX + column * module + module / 2, bounds.minY + row * module + module / 2) {
                     context.fill(CGRect(x: quiet + column, y: quiet + row, width: 1, height: 1))
                 }
             }
@@ -149,8 +175,8 @@ struct QRCodeDialog: View {
             code = nil
             UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) {
-            _ in captured = ScreenCapture.active
+        .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
+            captured = ScreenCapture.active
         }
         .onReceive(tick) { _ in
             captured = ScreenCapture.active

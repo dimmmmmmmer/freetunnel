@@ -149,6 +149,9 @@ public enum ImportDocument {
         guard cursor.index == bytes.count else { throw ClientError.invalidConfig }
         return number
     }
+}
+
+extension ImportDocument {
     private static func dnsServers(_ bytes: [UInt8]) throws -> [String] {
         var cursor = Cursor(bytes: bytes)
         var values: [String] = []
@@ -172,12 +175,21 @@ public enum ImportDocument {
         for (tag, key) in strings {
             if let bytes = records[tag] { endpoint[key] = try string(bytes) }
         }
+        try applyFlags(records, to: &endpoint)
+        try applyTransport(records, to: &endpoint)
+        if let bytes = records[8] { endpoint["certificate"] = try certificates(bytes) }
+        if let bytes = records[13] { endpoint["dns_upstreams"] = try dnsServers(bytes) }
+        return endpoint
+    }
+    private static func applyFlags(_ records: [Int: [UInt8]], to endpoint: inout [String: Any]) throws {
         for (tag, key) in [4: "has_ipv6", 7: "skip_verification", 10: "anti_dpi"] {
             if let bytes = records[tag] {
                 guard bytes.count == 1, bytes[0] <= 1 else { throw ClientError.invalidConfig }
                 endpoint[key] = bytes[0] == 1
             }
         }
+    }
+    private static func applyTransport(_ records: [Int: [UInt8]], to endpoint: inout [String: Any]) throws {
         if let bytes = records[9] {
             let value = try number(bytes)
             guard value == 1 || value == 2 else { throw ClientError.unsupportedFormat }
@@ -190,9 +202,6 @@ public enum ImportDocument {
             }
             if name != TlsProfiles.defaultProfile { endpoint["tls_profile"] = name }
         }
-        if let bytes = records[8] { endpoint["certificate"] = try certificates(bytes) }
-        if let bytes = records[13] { endpoint["dns_upstreams"] = try dnsServers(bytes) }
-        return endpoint
     }
     private static func link(_ text: String) throws -> Document {
         var cursor = Cursor(bytes: try payload(text))

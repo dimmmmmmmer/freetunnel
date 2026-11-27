@@ -21,10 +21,10 @@ public struct SpeedHistory: Equatable, Sendable {
         count = 0
     }
 
-    public mutating func add(down: Double, up: Double) {
-        let at = (start + count) % SpeedHistory.capacity
-        downs[at] = max(0, down)
-        ups[at] = max(0, up)
+    public mutating func add(down: Double, up upload: Double) {
+        let slot = (start + count) % SpeedHistory.capacity
+        downs[slot] = max(0, down)
+        ups[slot] = max(0, upload)
         if count < SpeedHistory.capacity {
             count += 1
         } else {

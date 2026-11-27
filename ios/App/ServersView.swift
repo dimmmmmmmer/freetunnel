@@ -50,7 +50,7 @@ struct ServersView: View {
                     } else if state.isPreview
                         && ProcessInfo.processInfo.environment["FT_PREVIEW_MENU"] == "qr" {
                         try? await Task.sleep(for: .milliseconds(500))
-                        if let id = state.selected?.id { state.dialog = .qr(id) }
+                        if let id = state.selected?.id { state.dialog = .qrCode(id) }
                     }
                 #endif
             }
@@ -172,31 +172,7 @@ struct ServersView: View {
                 isPresented: Binding(
                     get: { exportProfile == profile.id }, set: { if !$0 { exportProfile = nil } })
             ) {
-                VStack(alignment: .leading, spacing: 0) {
-                    exportAction("Export .toml…") {
-                        let config = try Configuration(state.secret(profile).toml)
-                        exportDocument = ConfigDocument(
-                            text: try DeepLinkEncoder.exportTOML(config))
-                        exportName = profile.name.replacingOccurrences(of: "/", with: "_")
-                            .replacingOccurrences(of: "\\", with: "_")
-                        exporting = true
-                    }
-                    exportAction("Copy deep-link") {
-                        state.copyToPasteboard(try state.deepLink(profile))
-                        state.message = "Deep-link copied — it contains the password, share it carefully"
-                    }
-                    exportAction("Show QR code", identifier: "export.qr") {
-                        // The code is made here too, to say so when the link is too long for one.
-                        if QRCode.make(try state.deepLink(profile)) == nil {
-                            state.message =
-                                "The deep-link is too long for a QR code — export .toml instead"
-                        } else {
-                            state.dialog = .qr(profile.id)
-                        }
-                    }
-                }.padding(6).frame(width: 230).foregroundStyle(AppStyle.text)
-                    .presentationCompactAdaptation(.popover)
-                    .presentationBackground(AppStyle.background)
+                exportMenu(profile)
             }
             Button {
                 state.dialog = .server(profile.id)
@@ -214,6 +190,33 @@ struct ServersView: View {
                 AppIcon(name: "ActionClose")
             }.accessibilityLabel("Delete").accessibilityIdentifier("server-delete-" + profile.name)
         }.buttonStyle(.plain).foregroundStyle(AppStyle.secondary)
+    }
+    private func exportMenu(_ profile: Profile) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            exportAction("Export .toml…") {
+                let config = try Configuration(state.secret(profile).toml)
+                exportDocument = ConfigDocument(
+                    text: try DeepLinkEncoder.exportTOML(config))
+                exportName = profile.name.replacingOccurrences(of: "/", with: "_")
+                    .replacingOccurrences(of: "\\", with: "_")
+                exporting = true
+            }
+            exportAction("Copy deep-link") {
+                state.copyToPasteboard(try state.deepLink(profile))
+                state.message = "Deep-link copied — it contains the password, share it carefully"
+            }
+            exportAction("Show QR code", identifier: "export.qr") {
+                // The code is made here too, to say so when the link is too long for one.
+                if QRCode.make(try state.deepLink(profile)) == nil {
+                    state.message =
+                        "The deep-link is too long for a QR code — export .toml instead"
+                } else {
+                    state.dialog = .qrCode(profile.id)
+                }
+            }
+        }.padding(6).frame(width: 230).foregroundStyle(AppStyle.text)
+            .presentationCompactAdaptation(.popover)
+            .presentationBackground(AppStyle.background)
     }
     private func exportAction(
         _ title: LocalizedStringKey, identifier: String = "", action: @escaping () throws -> Void

@@ -206,6 +206,9 @@ import XCTest
         tab("routing")
         XCTAssertFalse(direction.exists)
     }
+}
+
+extension FreeTunnelUITests {
     func testPortraitAndLandscapeLayouts() {
         app.launchArguments = ["--ui-preview", "-AppleLanguages", "(ru)"]
         app.launchEnvironment = ["FT_PREVIEW_LONG_NAMES": "1", "FT_PREVIEW_SCENARIO": "connected"]

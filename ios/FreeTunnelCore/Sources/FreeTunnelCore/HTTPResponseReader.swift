@@ -46,9 +46,9 @@ final class HTTPResponseReader {
 
     private func take(_ count: Int) async throws -> [UInt8]? {
         if position == buffer.count, !(try await fill()) { return nil }
-        let n = min(count, buffer.count - position)
-        defer { position += n }
-        return Array(buffer[position..<position + n])
+        let taken = min(count, buffer.count - position)
+        defer { position += taken }
+        return Array(buffer[position..<position + taken])
     }
 
     // One line without its line end (CRLF or a bare LF), of at most maximumLine bytes;
@@ -56,12 +56,12 @@ final class HTTPResponseReader {
     private func line(_ budget: inout Int) async throws -> String {
         var bytes = [UInt8]()
         while true {
-            guard let b = try await byte() else { throw SubscriptionFetchError.network }
+            guard let next = try await byte() else { throw SubscriptionFetchError.network }
             budget -= 1
             if budget < 0 { throw SubscriptionFetchError.invalid }
-            if b == 10 { break }
+            if next == 10 { break }
             if bytes.count >= Self.maximumLine { throw SubscriptionFetchError.invalid }
-            bytes.append(b)
+            bytes.append(next)
         }
         if bytes.last == 13 { bytes.removeLast() }
         return String(bytes: bytes, encoding: .isoLatin1) ?? ""
@@ -74,7 +74,8 @@ final class HTTPResponseReader {
             chars[8] == 32, chars[9...11].allSatisfy({ $0 >= 48 && $0 <= 57 }),
             chars.count == 12 || chars[12] == 32
         else { return nil }
-        return Int(String(decoding: chars[9...11], as: UTF8.self))
+        // Three ASCII digits, so the bytes are always valid UTF-8.
+        return String(bytes: chars[9...11], encoding: .utf8).flatMap { Int($0) }
     }
 
     private func headers(_ budget: inout Int) async throws -> [(String, String)] {

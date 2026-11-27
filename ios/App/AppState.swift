@@ -43,31 +43,7 @@ import VpnClientFramework
         prepareUITests()
         #if DEBUG
             if isPreview {
-                var profile = Profile(
-                    name: ProcessInfo.processInfo.environment["FT_PREVIEW_LONG_NAMES"] == "1"
-                        ? "Очень длинное название сервера — Германия, Франкфурт-на-Майне, основной сервер"
-                        : "FreeTunnel demo")
-                profile.routing.defaultDirection = .bypass
-                profile.routing.manualVPN = "example.org"
-                let list = GeoList(
-                    name: "Blocked sites in Russia", source: "https://example.com/sites.txt",
-                    kind: .sites, direction: .vpn)
-                profile.routing.lists = [list]
-                preferences.splitProfiles = [
-                    SplitProfile(name: "Default", routing: profile.routing)
-                ]
-                preferences.profiles = [profile]
-                preferences.selectedID = profile.id
-                snapshots[list.id] = GeoSnapshot(
-                    source: list.source, kind: list.kind,
-                    entries: [
-                        "example.org",
-                        "*.example.org"
-                    ], skipped: 0)
-                let scenario = ProcessInfo.processInfo.environment["FT_PREVIEW_SCENARIO"] ?? ""
-                vpn.preparePreview(scenario)
-                if scenario == "connected" { pings[profile.id] = "38 ms" }
-                loaded = true
+                loadPreviewState()
                 return
             }
         #endif
@@ -98,6 +74,35 @@ import VpnClientFramework
             }
         } catch { message = ClientError.storageFailed.rawValue }
     }
+    #if DEBUG
+        private func loadPreviewState() {
+            var profile = Profile(
+                name: ProcessInfo.processInfo.environment["FT_PREVIEW_LONG_NAMES"] == "1"
+                    ? "Очень длинное название сервера — Германия, Франкфурт-на-Майне, основной сервер"
+                    : "FreeTunnel demo")
+            profile.routing.defaultDirection = .bypass
+            profile.routing.manualVPN = "example.org"
+            let list = GeoList(
+                name: "Blocked sites in Russia", source: "https://example.com/sites.txt",
+                kind: .sites, direction: .vpn)
+            profile.routing.lists = [list]
+            preferences.splitProfiles = [
+                SplitProfile(name: "Default", routing: profile.routing)
+            ]
+            preferences.profiles = [profile]
+            preferences.selectedID = profile.id
+            snapshots[list.id] = GeoSnapshot(
+                source: list.source, kind: list.kind,
+                entries: [
+                    "example.org",
+                    "*.example.org"
+                ], skipped: 0)
+            let scenario = ProcessInfo.processInfo.environment["FT_PREVIEW_SCENARIO"] ?? ""
+            vpn.preparePreview(scenario)
+            if scenario == "connected" { pings[profile.id] = "38 ms" }
+            loaded = true
+        }
+    #endif
     func report(_ error: Error) {
         // URL errors often include subscription credentials. Never display raw errors.
         message = (error as? ClientError ?? .networkFailed).rawValue

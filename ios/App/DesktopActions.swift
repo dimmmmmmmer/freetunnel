@@ -5,7 +5,7 @@ import SwiftUI
 enum AppDialogRoute: Equatable {
     case server(UUID?)
     case importText, subscription
-    case qr(UUID)
+    case qrCode(UUID)
 }
 struct AppConfirmation {
     var text: String

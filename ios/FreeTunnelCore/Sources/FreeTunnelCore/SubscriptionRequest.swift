@@ -74,12 +74,10 @@ public struct SubscriptionRequest: Equatable {
         var result: [Data] = []
         var rest = Substring(text)
         while let begin = rest.range(of: "-----BEGIN CERTIFICATE-----"),
-            let end = rest.range(of: "-----END CERTIFICATE-----", range: begin.upperBound..<rest.endIndex)
-        {
+            let end = rest.range(of: "-----END CERTIFICATE-----", range: begin.upperBound..<rest.endIndex) {
             let body = rest[begin.upperBound..<end.lowerBound].filter { !$0.isWhitespace }
             if let der = Data(base64Encoded: String(body)), !der.isEmpty,
-                SecCertificateCreateWithData(nil, der as CFData) != nil
-            {
+                SecCertificateCreateWithData(nil, der as CFData) != nil {
                 result.append(der)
             }
             rest = rest[end.upperBound...]

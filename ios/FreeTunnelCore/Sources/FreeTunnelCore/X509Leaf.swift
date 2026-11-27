@@ -74,8 +74,8 @@ struct X509Leaf {
         var rest: Substring
         switch element.tag {
         case 0x17:
-            guard digits.count == 12 || digits.count == 10, let yy = Int(digits.prefix(2)) else { return nil }
-            year = yy >= 50 ? 1900 + yy : 2000 + yy
+            guard digits.count == 12 || digits.count == 10, let shortYear = Int(digits.prefix(2)) else { return nil }
+            year = shortYear >= 50 ? 1900 + shortYear : 2000 + shortYear
             rest = digits.dropFirst(2)
         case 0x18:
             guard digits.count == 14 || digits.count == 12, let yyyy = Int(digits.prefix(4)) else { return nil }
@@ -110,7 +110,8 @@ struct X509Leaf {
         }
     }
 
-    init?(der: Data) {
+    // The fields of the TBSCertificate, less its optional version.
+    private static func tbsFields(_ der: Data) -> [Element]? {
         let bytes = Array(der)[...]
         var index = bytes.startIndex
         guard let certificate = Self.next(bytes, &index), certificate.tag == 0x30,
@@ -119,8 +120,13 @@ struct X509Leaf {
             var fields = Self.children(tbsElement)
         else { return nil }
         if fields.first?.tag == 0xa0 { fields.removeFirst() }
+        return fields
+    }
+
+    init?(der: Data) {
         // serial, signature, issuer, validity, subject, subjectPublicKeyInfo, then optional parts
-        guard fields.count >= 6, let validity = Self.children(fields[3]), validity.count == 2,
+        guard let fields = Self.tbsFields(der), fields.count >= 6,
+            let validity = Self.children(fields[3]), validity.count == 2,
             let start = Self.time(validity[0]), let end = Self.time(validity[1])
         else { return nil }
         notBefore = start
@@ -135,33 +141,43 @@ struct X509Leaf {
             }
         }
         for field in fields.dropFirst(6) where field.tag == 0xa3 {
-            guard let wrapper = Self.children(field).flatMap({ $0.first }),
-                let extensions = Self.children(wrapper)
-            else { return nil }
-            for item in extensions {
-                guard let parts = Self.children(item), parts.count >= 2,
-                    let id = Self.oid(parts[0]), let value = parts.last, value.tag == 0x04
-                else { continue }
-                guard id == "2.5.29.17" || id == "2.5.29.37" else { continue }
-                var inner = value.content.startIndex
-                guard let body = Self.next(value.content, &inner), body.tag == 0x30,
-                    let entries = Self.children(body)
-                else { return nil }
-                switch id {
-                case "2.5.29.17":
-                    for entry in entries {
-                        if entry.tag == 0x82, let name = String(bytes: Array(entry.content), encoding: .utf8) {
-                            dnsNames.append(name)
-                        } else if entry.tag == 0x87, entry.content.count == 4 || entry.content.count == 16 {
-                            ipAddresses.append(Array(entry.content))
-                        }
-                    }
-                case "2.5.29.37":
-                    extendedKeyUsage = entries.compactMap(Self.oid)
-                default: break
+            guard readExtensions(of: field) else { return nil }
+        }
+    }
+
+    // The extensions wrapper (tag 0xa3); false when it is malformed.
+    private mutating func readExtensions(of field: Element) -> Bool {
+        guard let wrapper = Self.children(field).flatMap({ $0.first }),
+            let extensions = Self.children(wrapper)
+        else { return false }
+        for item in extensions where !readExtension(item) { return false }
+        return true
+    }
+
+    // One extension; those this does not read are skipped, a malformed one is false.
+    private mutating func readExtension(_ item: Element) -> Bool {
+        guard let parts = Self.children(item), parts.count >= 2,
+            let id = Self.oid(parts[0]), let value = parts.last, value.tag == 0x04
+        else { return true }
+        guard id == "2.5.29.17" || id == "2.5.29.37" else { return true }
+        var inner = value.content.startIndex
+        guard let body = Self.next(value.content, &inner), body.tag == 0x30,
+            let entries = Self.children(body)
+        else { return false }
+        switch id {
+        case "2.5.29.17":
+            for entry in entries {
+                if entry.tag == 0x82, let name = String(bytes: Array(entry.content), encoding: .utf8) {
+                    dnsNames.append(name)
+                } else if entry.tag == 0x87, entry.content.count == 4 || entry.content.count == 16 {
+                    ipAddresses.append(Array(entry.content))
                 }
             }
+        case "2.5.29.37":
+            extendedKeyUsage = entries.compactMap(Self.oid)
+        default: break
         }
+        return true
     }
 
     // MARK: acceptance
@@ -196,10 +212,10 @@ struct X509Leaf {
     }
 
     private static func addressBytes(_ text: String) -> [UInt8]? {
-        var v4 = in_addr()
-        if inet_pton(AF_INET, text, &v4) == 1 { return withUnsafeBytes(of: &v4) { Array($0) } }
-        var v6 = in6_addr()
-        if inet_pton(AF_INET6, text, &v6) == 1 { return withUnsafeBytes(of: &v6) { Array($0) } }
+        var ipv4 = in_addr()
+        if inet_pton(AF_INET, text, &ipv4) == 1 { return withUnsafeBytes(of: &ipv4) { Array($0) } }
+        var ipv6 = in6_addr()
+        if inet_pton(AF_INET6, text, &ipv6) == 1 { return withUnsafeBytes(of: &ipv6) { Array($0) } }
         return nil
     }
 

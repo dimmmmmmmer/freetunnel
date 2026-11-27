@@ -77,8 +77,7 @@ public enum SubscriptionFetcher {
 
     // The unpinned fetch, ended by the deadline: the task is cancelled when time is up.
     private static func race(_ state: Deadline, _ work: @escaping @Sendable () async throws -> Data)
-        async throws -> Data
-    {
+        async throws -> Data {
         let task = Task { try await work() }
         state.whenExpired { task.cancel() }
         return try await withTaskCancellationHandler {
@@ -89,8 +88,7 @@ public enum SubscriptionFetcher {
     }
 
     private static func pinned(_ request: SubscriptionRequest, _ original: SubscriptionURL, _ state: Deadline)
-        async throws -> Data
-    {
+        async throws -> Data {
         let authorization = original.authorization
         var url = original
         var seen = [original.urlString]
@@ -135,8 +133,7 @@ public enum SubscriptionFetcher {
         // No SNI names an IP number: when the TLS name is one and the connection goes to a
         // host name, connect to the number it resolves to, so that the name is not sent.
         if SubscriptionURL.isIPLiteral(SubscriptionURL.hostKey(request.verifyName)),
-            !SubscriptionURL.isIPLiteral(SubscriptionURL.hostKey(host))
-        {
+            !SubscriptionURL.isIPLiteral(SubscriptionURL.hostKey(host)) {
             host = try await PinnedHTTPS.resolve(host, deadline: state)
         }
         let port = request.connectPort ?? url.effectivePort

@@ -45,12 +45,12 @@ import NetworkExtension
                 upSpeed = 0.3
                 // A minute of plausible traffic, ending at the speeds the tiles show.
                 for second in 0..<SpeedHistory.capacity {
-                    let t = Double(second)
-                    let ramp = min(1, t / 8)
-                    let down = ramp * (1_400_000 + 900_000 * sin(t / 5) + 350_000 * sin(t * 1.7))
-                    let up = ramp * (240_000 + 110_000 * sin(t / 3 + 1))
+                    let time = Double(second)
+                    let ramp = min(1, time / 8)
+                    let down = ramp * (1_400_000 + 900_000 * sin(time / 5) + 350_000 * sin(time * 1.7))
+                    let upload = ramp * (240_000 + 110_000 * sin(time / 3 + 1))
                     history.add(down: second == SpeedHistory.capacity - 1 ? 2_400_000 : down,
-                                up: second == SpeedHistory.capacity - 1 ? 300_000 : up)
+                                up: second == SpeedHistory.capacity - 1 ? 300_000 : upload)
                 }
             } else if scenario == "logs-filled" {
                 logs =

@@ -74,27 +74,32 @@ public struct SubscriptionURL: Equatable {
         }
         var hostPart = authority
         var user = "", password = ""
-        if let at = authority.lastIndex(of: UInt8(ascii: "@")) {
-            hostPart = Array(authority[(at + 1)...])
-            let info = Array(authority[..<at])
-            guard !info.contains(UInt8(ascii: "@")) else { return nil }
-            let colon = info.firstIndex(of: UInt8(ascii: ":"))
-            guard let first = decode(colon.map { Array(info[..<$0]) } ?? info),
-                let second = decode(colon.map { Array(info[($0 + 1)...]) } ?? [])
-            else { return nil }
-            user = first
-            password = second
-            // Basic credentials are the user, a colon and the password; and what the
-            // server is sent is what the address holds, so no control character is
-            // dropped on the way.
-            guard !user.contains(":"),
-                !(user + password).unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 })
-            else { return nil }
+        if let atSign = authority.lastIndex(of: UInt8(ascii: "@")) {
+            hostPart = Array(authority[(atSign + 1)...])
+            guard let credentials = credentials(Array(authority[..<atSign])) else { return nil }
+            user = credentials.user
+            password = credentials.password
         }
-        guard let (host, v6, port) = hostAndPort(hostPart) else { return nil }
+        guard let target = hostAndPort(hostPart) else { return nil }
         return SubscriptionURL(
-            host: host, isIPv6: v6, port: port, encodedPath: path, encodedQuery: encodedQuery,
-            user: user, password: password)
+            host: target.host, isIPv6: target.isIPv6, port: target.port, encodedPath: path,
+            encodedQuery: encodedQuery, user: user, password: password)
+    }
+
+    // The userinfo before the last "@": a user, optionally a colon and a password.
+    private static func credentials(_ info: [UInt8]) -> (user: String, password: String)? {
+        guard !info.contains(UInt8(ascii: "@")) else { return nil }
+        let colon = info.firstIndex(of: UInt8(ascii: ":"))
+        guard let user = decode(colon.map { Array(info[..<$0]) } ?? info),
+            let password = decode(colon.map { Array(info[($0 + 1)...]) } ?? [])
+        else { return nil }
+        // Basic credentials are the user, a colon and the password; and what the
+        // server is sent is what the address holds, so no control character is
+        // dropped on the way.
+        guard !user.contains(":"),
+            !(user + password).unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 })
+        else { return nil }
+        return (user, password)
     }
 
     // MARK: pieces
@@ -117,7 +122,8 @@ public struct SubscriptionURL: Equatable {
                 guard index + 2 < bytes.count, hexValue(bytes[index + 1]) != nil,
                     hexValue(bytes[index + 2]) != nil
                 else { return nil }
-                out += String(decoding: bytes[index...index + 2], as: UTF8.self)
+                // "%" and two hex digits: ASCII, so each byte is its own scalar.
+                for escaped in bytes[index...index + 2] { out.unicodeScalars.append(Unicode.Scalar(escaped)) }
                 index += 3
                 continue
             }
@@ -160,10 +166,16 @@ public struct SubscriptionURL: Equatable {
         return String(bytes: out, encoding: .utf8)
     }
 
-    private static func hostAndPort(_ bytes: [UInt8]) -> (String, Bool, Int?)? {
+    private struct HostAndPort {
+        let host: String
+        let isIPv6: Bool
+        let port: Int?
+    }
+
+    private static func hostAndPort(_ bytes: [UInt8]) -> HostAndPort? {
         var hostBytes = bytes
         var portBytes: [UInt8] = []
-        var v6 = false
+        var bracketed = false
         if bytes.first == UInt8(ascii: "[") {
             guard let close = bytes.firstIndex(of: UInt8(ascii: "]")) else { return nil }
             hostBytes = Array(bytes[1..<close])
@@ -172,7 +184,7 @@ public struct SubscriptionURL: Equatable {
                 guard tail.first == UInt8(ascii: ":") else { return nil }
                 portBytes = Array(tail.dropFirst())
             }
-            v6 = true
+            bracketed = true
         } else if let colon = bytes.lastIndex(of: UInt8(ascii: ":")) {
             hostBytes = Array(bytes[..<colon])
             portBytes = Array(bytes[(colon + 1)...])
@@ -180,19 +192,20 @@ public struct SubscriptionURL: Equatable {
         guard let text = String(bytes: hostBytes, encoding: .utf8), let parsed = port(portBytes) else {
             return nil
         }
-        if v6 {
+        if bracketed {
             guard let key = canonicalIPv6(text) else { return nil }
-            return (key, true, parsed.value)
+            return HostAndPort(host: key, isIPv6: true, port: parsed.value)
         }
         guard let host = asciiHost(text) else { return nil }
-        return (host, false, parsed.value)
+        return HostAndPort(host: host, isIPv6: false, port: parsed.value)
     }
 
     // An empty port is none; anything but 1...65535 in digits is no port.
     private static func port(_ bytes: [UInt8]) -> (value: Int?, Void)? {
         if bytes.isEmpty { return (nil, ()) }
         guard bytes.count <= 8, bytes.allSatisfy({ $0 >= 48 && $0 <= 57 }),
-            let value = Int(String(decoding: bytes, as: UTF8.self)), value >= 1, value <= 65535
+            // Only ASCII digits got here, so the bytes are always valid UTF-8.
+            let value = String(bytes: bytes, encoding: .utf8).flatMap({ Int($0) }), value >= 1, value <= 65535
         else { return nil }
         return (value, ())
     }
@@ -230,7 +243,9 @@ public struct SubscriptionURL: Equatable {
                 || properties.generalCategory == .spaceSeparator
         }
     }
+}
 
+extension SubscriptionURL {
     // MARK: host names
 
     /// A host as it names a server, as the desktop's `hostKey`: in ACE form and in lower
@@ -246,7 +261,7 @@ public struct SubscriptionURL: Equatable {
             name = String(name.dropFirst().dropLast())
         }
         guard name.utf8.count <= 253 else { return nil }
-        if let v6 = canonicalIPv6(name) { return v6 }
+        if let ipv6 = canonicalIPv6(name) { return ipv6 }
         let separators: Set<Character> = [".", "\u{3002}", "\u{FF0E}", "\u{FF61}"]
         let labels = name.split(omittingEmptySubsequences: false, whereSeparator: { separators.contains($0) })
         var out: [String] = []
@@ -282,66 +297,10 @@ public struct SubscriptionURL: Equatable {
 
     /// Whether the text is an IPv4 or IPv6 address (no brackets).
     public static func isIPLiteral(_ text: String) -> Bool {
-        var v4 = in_addr()
-        return canonicalIPv6(text) != nil || inet_pton(AF_INET, text, &v4) == 1
+        var ipv4 = in_addr()
+        return canonicalIPv6(text) != nil || inet_pton(AF_INET, text, &ipv4) == 1
     }
 
     // RFC 3492, with every step of the arithmetic checked: nil on overflow.
-    static func punycode(_ input: [UInt32]) -> String? {
-        let base: UInt32 = 36, tMin: UInt32 = 1, tMax: UInt32 = 26, skew: UInt32 = 38, damp: UInt32 = 700
-        guard input.allSatisfy({ $0 <= 0x10FFFF }) else { return nil }
-        var n: UInt32 = 128, delta: UInt32 = 0, bias: UInt32 = 72
-        var output = input.filter { $0 < 128 }.map { Character(Unicode.Scalar($0)!) }
-        let basic = UInt32(output.count)
-        var handled = basic
-        if basic > 0 { output.append("-") }
-        func digit(_ d: UInt32) -> Character {
-            Character(Unicode.Scalar(d < 26 ? d + 97 : d + 22)!)
-        }
-        func adapt(_ delta: UInt32, _ points: UInt32, _ first: Bool) -> UInt32 {
-            var d = first ? delta / damp : delta / 2
-            d += d / points
-            var k: UInt32 = 0
-            while d > ((base - tMin) * tMax) / 2 {
-                d /= base - tMin
-                k += base
-            }
-            return k + (base - tMin + 1) * d / (d + skew)
-        }
-        while handled < UInt32(input.count) {
-            guard let m = input.filter({ $0 >= n }).min() else { return nil }
-            let (product, overflow) = (m - n).multipliedReportingOverflow(by: handled + 1)
-            let (sum, overflow2) = delta.addingReportingOverflow(product)
-            if overflow || overflow2 { return nil }
-            delta = sum
-            n = m
-            for c in input {
-                if c < n {
-                    let (next, over) = delta.addingReportingOverflow(1)
-                    if over { return nil }
-                    delta = next
-                }
-                if c == n {
-                    var q = delta
-                    var k = base
-                    while true {
-                        let t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias)
-                        if q < t { break }
-                        output.append(digit(t + (q - t) % (base - t)))
-                        q = (q - t) / (base - t)
-                        k += base
-                    }
-                    output.append(digit(q))
-                    bias = adapt(delta, handled + 1, handled == basic)
-                    delta = 0
-                    handled += 1
-                }
-            }
-            let (next, over) = delta.addingReportingOverflow(1)
-            if over || n == UInt32.max { return nil }
-            delta = next
-            n += 1
-        }
-        return String(output)
-    }
+    static func punycode(_ input: [UInt32]) -> String? { PunycodeEncoder.encode(input) }
 }

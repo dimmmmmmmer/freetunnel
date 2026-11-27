@@ -107,9 +107,9 @@ enum PinnedHTTPS {
 
         func read() async throws -> Data? {
             if finished { return nil }
+            let chunk = 16 * 1024
             let result: Data? = try await wait { finish in
-                self.connection.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) {
-                    data, _, complete, error in
+                self.connection.receive(minimumIncompleteLength: 1, maximumLength: chunk) { data, _, complete, error in
                     if let data, !data.isEmpty {
                         if complete { self.finished = true }
                         finish(.success(data))
@@ -148,8 +148,7 @@ enum PinnedHTTPS {
                 let reference = sec_trust_copy_ref(trust).takeRetainedValue()
                 var accepted = false
                 if let chain = SecTrustCopyCertificateChain(reference) as? [SecCertificate],
-                    let leaf = chain.first
-                {
+                    let leaf = chain.first {
                     let der = SecCertificateCopyData(leaf) as Data
                     accepted = X509Leaf.accepts(leaf: der, pins: pins, verifyName: verifyName)
                 }
@@ -200,22 +199,27 @@ enum PinnedHTTPS {
                     return
                 }
                 defer { freeaddrinfo(head) }
-                var v4: String?, v6: String?
+                var ipv4: String?, ipv6: String?
                 var entry: UnsafeMutablePointer<addrinfo>? = head
                 while let current = entry {
                     var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
                     if getnameinfo(
                         current.pointee.ai_addr, current.pointee.ai_addrlen, &buffer, socklen_t(buffer.count),
-                        nil, 0, NI_NUMERICHOST) == 0
-                    {
+                        nil, 0, NI_NUMERICHOST) == 0 {
                         let text = String(cString: buffer)
-                        if current.pointee.ai_family == AF_INET { v4 = v4 ?? text }
-                        else if current.pointee.ai_family == AF_INET6, !text.contains("%") { v6 = v6 ?? text }
+                        if current.pointee.ai_family == AF_INET {
+                            ipv4 = ipv4 ?? text
+                        } else if current.pointee.ai_family == AF_INET6, !text.contains("%") {
+                            ipv6 = ipv6 ?? text
+                        }
                     }
                     entry = current.pointee.ai_next
                 }
-                if let address = v4 ?? v6 { finish(.success(address)) }
-                else { finish(.failure(SubscriptionFetchError.network)) }
+                if let address = ipv4 ?? ipv6 {
+                    finish(.success(address))
+                } else {
+                    finish(.failure(SubscriptionFetchError.network))
+                }
             }
         }
     }

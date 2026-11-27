@@ -27,29 +27,29 @@ struct SpeedGraph: View {
             let top = pad
             let bottom = size.height - pad
             let step = (right - left) / CGFloat(SpeedHistory.capacity - 1)
-            let x0 = right - CGFloat(count - 1) * step
+            let firstX = right - CGFloat(count - 1) * step
             let scale = history.scale
             func trace(_ value: (Int) -> Double) -> Path {
                 var path = Path()
                 for index in 0..<count {
                     let level = CGFloat(min(1, value(index) / scale))
                     let point = CGPoint(
-                        x: x0 + CGFloat(index) * step, y: bottom - (bottom - top) * level)
+                        x: firstX + CGFloat(index) * step, y: bottom - (bottom - top) * level)
                     if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
                 }
                 return path
             }
             let down = trace(history.down)
-            let up = trace(history.up)
+            let upload = trace(history.up)
             // Under what came in, a faint fill down to the baseline.
             var fill = down
             fill.addLine(to: CGPoint(x: right, y: bottom))
-            fill.addLine(to: CGPoint(x: x0, y: bottom))
+            fill.addLine(to: CGPoint(x: firstX, y: bottom))
             fill.closeSubpath()
             context.fill(fill, with: .color(AppStyle.success.opacity(Double(0x2E) / 255)))
             let style = StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
             context.stroke(down, with: .color(AppStyle.success), style: style)
-            context.stroke(up, with: .color(AppStyle.secondary), style: style)
+            context.stroke(upload, with: .color(AppStyle.secondary), style: style)
         }
         .frame(height: HomeMetrics.graphHeight)
         .background(
