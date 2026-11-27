@@ -68,6 +68,13 @@ class AndroidCiTest(unittest.TestCase):
         self.assertEqual(['build'], writers)
         build = jobs.split('\n  build:\n', 1)[1].split('\n  device-tests:\n', 1)[0]
         self.assertIn(':app:assembleDebugAndroidTest', build)
+        # And what connectedDebugAndroidTest resolves only with a device, which the task resolves.
+        self.assertIn(':app:resolveConnectedTestDependencies', build)
+        app = (ROOT / 'android/app/build.gradle').read_text()
+        task = app.split("tasks.register('resolveConnectedTestDependencies')", 1)[1].split('\n}\n', 1)[0]
+        for needed in ["tasks.named('connectedDebugAndroidTest').get()", "it.name.contains('unified-test-platform')",
+                       "'unified-test-platform-gradle-work-action'", 'it.files']:
+            self.assertIn(needed, task)
         routing = (ROOT / '.github/workflows/incoming-routing.yml').read_text()
         self.assertIn('cache-provider: basic\n          cache-read-only: true', routing)
 

@@ -221,5 +221,22 @@ androidComponents {
     }
 }
 
+// What connectedDebugAndroidTest downloads only once a device is there: the Unified Test Platform that Android Gradle Plugin runs the tests
+// with, in configurations whose names hold unified-test-platform and that the plugin makes as it sets that task up. CI's build job runs
+// this, and it alone saves the Gradle cache, so the device tests find them in the cache rather than at Maven Central, which answers CI's
+// shared runners 429 (Too Many Requests) at times. It fails if the configuration the device tests failed on is gone, a sign the plugin
+// renamed them and the cache would quietly lack them again.
+tasks.register('resolveConnectedTestDependencies') {
+    description = 'Downloads what connectedDebugAndroidTest resolves at run time, for the Gradle cache'
+    tasks.named('connectedDebugAndroidTest').get()
+    def platform = configurations.findAll { it.canBeResolved && it.name.contains('unified-test-platform') }
+    doLast {
+        if (!platform*.name.contains('unified-test-platform-gradle-work-action')) {
+            throw new GradleException("No unified-test-platform-gradle-work-action configuration, only ${platform*.name}")
+        }
+        platform.each { logger.lifecycle("${it.name}: ${it.files.size()} files") }
+    }
+}
+
 ext.coreAar = coreAar
 apply from: rootProject.file('verify-core.gradle')
