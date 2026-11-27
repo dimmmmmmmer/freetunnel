@@ -1,6 +1,7 @@
 import importlib.util
 import itertools
 import os
+import re
 from pathlib import Path
 import subprocess  # nosec B404 - Tests execute repository-owned CI scripts.
 import tempfile
@@ -50,6 +51,30 @@ class AndroidCiTest(unittest.TestCase):
                        'scripts/android-core-manifest.py']:
             self.assertIn(source, core)
         self.assertIn('      - run: scripts/prepare-trusttunnel-android.sh\n      - uses: actions/upload-artifact', core)
+
+    def test_only_the_build_job_saves_the_gradle_cache(self):
+        # Basic caching never overwrites its one entry per build-file hash, so a
+        # job that resolves less than the device tests must not be the one to save it.
+        workflow = (ROOT / '.github/workflows/android.yml').read_text()
+        jobs = workflow.split('\njobs:\n', 1)[1]
+        writers = []
+        for name, job in re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)', jobs, re.M | re.S):
+            for step in job.split('- uses: ')[1:]:
+                if step.startswith('gradle/actions/setup-gradle@'):
+                    options = step.split('\n      - ', 1)[0]
+                    self.assertIn('cache-provider: basic', options, name)
+                    if 'cache-read-only: true' not in options:
+                        writers.append(name)
+        self.assertEqual(['build'], writers)
+        build = jobs.split('\n  build:\n', 1)[1].split('\n  device-tests:\n', 1)[0]
+        self.assertIn(':app:assembleDebugAndroidTest', build)
+        routing = (ROOT / '.github/workflows/incoming-routing.yml').read_text()
+        self.assertIn('cache-provider: basic\n          cache-read-only: true', routing)
+
+    def test_gradle_rides_out_maven_central_rate_limits(self):
+        properties = (ROOT / 'android/gradle.properties').read_text().splitlines()
+        self.assertIn('systemProp.org.gradle.internal.repository.max.tentatives=6', properties)
+        self.assertIn('systemProp.org.gradle.internal.repository.initial.backoff=3000', properties)
 
     def test_instrumentation_exit_and_result_are_both_checked(self):
         with tempfile.TemporaryDirectory() as temporary:
